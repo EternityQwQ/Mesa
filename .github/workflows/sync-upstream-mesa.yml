@@ -1,0 +1,74 @@
+name: Sync upstream Mesa
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: sync-upstream-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.ref_type == 'branch'
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync Mesa source tree
+        env:
+          UPSTREAM_URL: https://gitlab.freedesktop.org/mesa/mesa.git
+          UPSTREAM_BRANCH: main
+        run: |
+          set -euo pipefail
+
+          before=$(git rev-parse --short HEAD)
+
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream "$UPSTREAM_URL"
+          else
+            git remote add upstream "$UPSTREAM_URL"
+          fi
+
+          git fetch --no-tags --depth=1 upstream \
+            "+refs/heads/$UPSTREAM_BRANCH:refs/remotes/upstream/$UPSTREAM_BRANCH"
+          upstream_sha=$(git rev-parse --short "upstream/$UPSTREAM_BRANCH")
+
+          # This repository was imported as an unrelated single snapshot commit,
+          # so there is no common ancestor to merge. Replace the tree with
+          # upstream's tree and keep this repository's CI configuration.
+          git read-tree -u --reset "upstream/$UPSTREAM_BRANCH"
+          git checkout HEAD -- .github
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Already up to date with upstream Mesa ($upstream_sha)."
+            {
+              echo "### Upstream Mesa sync"
+              echo ""
+              echo "Already up to date: \`$upstream_sha\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          git commit -m "Sync with upstream Mesa $upstream_sha"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+          {
+            echo "### Upstream Mesa sync"
+            echo ""
+            echo "- Previous commit: \`$before\`"
+            echo "- Upstream commit: \`$upstream_sha\`"
+            echo "- New commit: \`$(git rev-parse --short HEAD)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
