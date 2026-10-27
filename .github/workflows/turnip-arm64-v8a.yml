@@ -1,0 +1,164 @@
+name: Turnip arm64-v8a
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: turnip-arm64-v8a-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NDK_VERSION: r27c
+  API_LEVEL: 34
+
+jobs:
+  build-turnip-arm64-v8a:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kmd: kgsl
+            kmds: kgsl
+          - kmd: msm
+            kmds: msm
+          - kmd: virtio
+            kmds: msm,virtio
+    runs-on: ubuntu-24.04
+    env:
+      BUILD_DIR: build-android-aarch64-${{ matrix.kmd }}
+      KMD: ${{ matrix.kmd }}
+      KMDS: ${{ matrix.kmds }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          add-to-path: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build flex bison pkg-config patchelf zip file \
+            python3-venv python3-pip python3-mako python3-packaging \
+            python3-ply python3-yaml glslang-tools
+          python3 -m venv "$RUNNER_TEMP/meson-venv"
+          "$RUNNER_TEMP/meson-venv/bin/pip" install --upgrade pip "meson>=1.4"
+          echo "$RUNNER_TEMP/meson-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Show toolchain
+        run: |
+          meson --version
+          ninja --version
+          NDK_ROOT="${ANDROID_NDK_ROOT:-${ANDROID_NDK_HOME}}"
+          echo "NDK_ROOT=$NDK_ROOT"
+          "$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ env.API_LEVEL }}-clang" --version
+
+      - name: Generate Meson cross file
+        run: |
+          NDK_ROOT="${ANDROID_NDK_ROOT:-${ANDROID_NDK_HOME}}"
+          EMPTY_PKGCONFIG="$PWD/empty-pkgconfig"
+          mkdir -p "$EMPTY_PKGCONFIG"
+          printf "[constants]\nndk_path = '%s'\n\n[binaries]\nar = ndk_path / 'toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar'\nc = [ndk_path / 'toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ env.API_LEVEL }}-clang']\ncpp = [ndk_path / 'toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${{ env.API_LEVEL }}-clang++', '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '--start-no-unused-arguments', '-static-libstdc++', '--end-no-unused-arguments']\nc_ld = 'lld'\ncpp_ld = 'lld'\nstrip = ndk_path / 'toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip'\npkg-config = ['/usr/bin/pkg-config']\n\n[properties]\npkg_config_libdir = '%s'\n\n[host_machine]\nsystem = 'android'\ncpu_family = 'aarch64'\ncpu = 'armv8'\nendian = 'little'\n" "$NDK_ROOT" "$EMPTY_PKGCONFIG" > android-aarch64
+          cat android-aarch64
+
+      - name: Meson setup
+        run: |
+          meson setup "$BUILD_DIR" \
+            --cross-file android-aarch64 \
+            --buildtype=release \
+            --prefix=/vendor \
+            -Dplatforms=android \
+            -Dplatform-sdk-version=${{ env.API_LEVEL }} \
+            -Dandroid-stub=true \
+            -Dandroid-libbacktrace=disabled \
+            -Dandroid-libperfetto=disabled \
+            -Degl=disabled \
+            -Dglx=disabled \
+            -Dgbm=disabled \
+            -Dopengl=false \
+            -Dgles1=disabled \
+            -Dgles2=disabled \
+            -Dllvm=disabled \
+            -Dzstd=disabled \
+            -Dspirv-tools=disabled \
+            -Dbuild-tests=false \
+            -Dgallium-drivers= \
+            -Dvulkan-drivers=freedreno \
+            -Dfreedreno-kmds=$KMDS \
+            -Dallow-fallback-for=libdrm \
+            -Dlibarchive:openssl=disabled \
+            -Dlibarchive:zlib=disabled \
+            -Dlibarchive:bz2lib=disabled \
+            -Dlibarchive:libb2=disabled \
+            -Dlibarchive:iconv=disabled \
+            -Dlibarchive:lz4=disabled \
+            -Dlibarchive:zstd=disabled \
+            -Dlibarchive:lzma=disabled \
+            -Dlibarchive:lzo2=disabled \
+            -Dlibarchive:xml2=disabled \
+            -Dlibarchive:expat=disabled
+
+      - name: Compile
+        run: |
+          meson compile -C "$BUILD_DIR" --jobs "$(nproc)"
+
+      - name: Verify artifacts
+        run: |
+          NDK_ROOT="${ANDROID_NDK_ROOT:-${ANDROID_NDK_HOME}}"
+          READELF="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          ls -lh "$BUILD_DIR/src/freedreno/vulkan/"
+          file "$BUILD_DIR/src/freedreno/vulkan/"*.so
+          "$READELF" -h "$BUILD_DIR/src/freedreno/vulkan/libvulkan_freedreno.so" | grep -E "Class|Machine"
+          "$READELF" -d "$BUILD_DIR/src/freedreno/vulkan/libvulkan_freedreno.so" | grep NEEDED
+
+      - name: Package
+        run: |
+          OUT="turnip-arm64-v8a-$KMD"
+          mkdir -p "dist/$OUT"
+          cp "$BUILD_DIR/src/freedreno/vulkan/libvulkan_freedreno.so" "dist/$OUT/"
+          cp "$BUILD_DIR/src/freedreno/vulkan/"*.json "dist/$OUT/" || true
+
+          # Make the ICD manifest portable instead of pointing at the build prefix.
+          for json in "dist/$OUT"/*.json; do
+            [ -e "$json" ] || continue
+            sed -i -E 's#"library_path"[[:space:]]*:[[:space:]]*"[^"]*"#"library_path": "libvulkan_freedreno.so"#g' "$json"
+          done
+
+          cp VERSION "dist/$OUT/"
+          git rev-parse --short HEAD > "dist/$OUT/commit.txt"
+          meson introspect "$BUILD_DIR" --buildoptions \
+            | grep -E "vulkan-drivers|freedreno-kmds|platforms|platform-sdk-version|buildtype" \
+            > "dist/$OUT/buildoptions.txt" || true
+          sha256sum "dist/$OUT/libvulkan_freedreno.so" > "dist/$OUT/sha256sum.txt"
+
+          (cd dist && zip -r "../$OUT.zip" "$OUT")
+          ls -lh "$OUT.zip"
+          unzip -l "$OUT.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: turnip-arm64-v8a-${{ matrix.kmd }}
+          path: turnip-arm64-v8a-${{ matrix.kmd }}.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Meson logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-${{ matrix.kmd }}
+          path: ${{ env.BUILD_DIR }}/meson-logs/
+          if-no-files-found: ignore
+          retention-days: 5
