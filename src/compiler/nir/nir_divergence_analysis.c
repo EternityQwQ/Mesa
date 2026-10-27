@@ -248,6 +248,7 @@ visit_intrinsic(nir_intrinsic_instr *instr, struct divergence_state *state)
    case nir_intrinsic_load_raw_vertex_offset:
    case nir_intrinsic_load_first_vertex:
    case nir_intrinsic_load_draw_id:
+   case nir_intrinsic_load_draw_id_offset_ir3:
    case nir_intrinsic_load_is_indexed_draw:
    case nir_intrinsic_load_viewport_scale:
    case nir_intrinsic_load_user_clip_plane:
@@ -924,6 +925,7 @@ visit_intrinsic(nir_intrinsic_instr *instr, struct divergence_state *state)
    case nir_intrinsic_load_color1_amd:
    case nir_intrinsic_load_sample_id:
    case nir_intrinsic_load_sample_mask_in:
+   case nir_intrinsic_load_poly_line_smooth_coverage:
    case nir_intrinsic_load_interpolated_input:
    case nir_intrinsic_load_interpolated_input_amd:
    case nir_intrinsic_load_point_coord_maybe_flipped:
@@ -1144,6 +1146,7 @@ visit_intrinsic(nir_intrinsic_instr *instr, struct divergence_state *state)
    case nir_intrinsic_load_global_transpose_amd:
    case nir_intrinsic_load_deref_transpose_amd:
    case nir_intrinsic_load_global_tr_amd:
+   case nir_intrinsic_trace_ray_intel:
       is_divergent = true;
       break;
 

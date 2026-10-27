@@ -1459,6 +1459,8 @@ optimizations.extend([
     )
    ),
 
+   (('bcsel', ('ine', ('iand@32', a, '#b(is_pos_power_of_two)'), 0), b, 0), ('iand', a, b)),
+
    (('b2i32', ('ine', ('iand', 'a@32', '#b(is_pos_power_of_two)'), 0)),
     ('ushr', ('iand', a, b), ('find_lsb', b)), '!options->lower_bitops'),
 
@@ -2223,7 +2225,14 @@ optimizations.extend([
    (('ior', ('ishl', ('u2u32', 'a@8'), 24), ('ior', ('ishl', ('u2u32', 'b@8'), 16), ('ior', ('ishl', ('u2u32', 'c@8'), 8), ('u2u32', 'd@8')))),
     ('pack_32_4x8', ('vec4', d, c, b, a)), 'options->has_pack_32_4x8'),
 
+   # Open-coded packing
    (('ior', ('ishl', a, 16), ('u2u32', 'b@16')), ('pack_32_2x16_split', b, ('u2u16', a)), '!options->lower_pack_32_2x16_split && !options->lower_pack_split'),
+   (('ior', ('ishl', a, 32), ('u2u64', 'b@32')), ('pack_64_2x32_split', b, ('u2u32', a)), '!options->lower_pack_64_2x32_split'),
+   (('ishl', ('u2u32', 'a@16'), 16), ('pack_32_2x16_split', 0, a), '!options->lower_pack_32_2x16_split && !options->lower_pack_split'),
+   (('ishl', ('u2u64', 'a@32'), 32), ('pack_64_2x32_split', 0, a), '!options->lower_pack_64_2x32_split'),
+
+   (('ior', ('pack_32_2x16_split', a, 0), ('pack_32_2x16_split', 0, b)), ('pack_32_2x16_split', a, b)),
+   (('ior', ('pack_64_2x32_split', a, 0), ('pack_64_2x32_split', 0, b)), ('pack_64_2x32_split', a, b)),
 
    # Mixed 16-bit/8-bit loads vectorized to 8-bit vector load and then lowered to 32-bit
    (('ior', ('u2u16', ('unpack_32_4x8', a)), ('ishl', ('u2u16', ('unpack_32_4x8.y', a)), 8)),
@@ -2296,6 +2305,8 @@ optimizations.extend([
 
    (('iadd', ('pack_half_2x16_rtz_split', a, 0), ('pack_half_2x16_rtz_split', 0, b)), ('pack_half_2x16_rtz_split', a, b)),
    (('ior',  ('pack_half_2x16_rtz_split', a, 0), ('pack_half_2x16_rtz_split', 0, b)), ('pack_half_2x16_rtz_split', a, b)),
+   (('ior', ('pack_32_2x16_split', a, 0), ('pack_half_2x16_rtz_split', 0, b)), ('pack_32_2x16_split', a, ('f2f16_rtz', b))),
+   (('ior',  ('pack_half_2x16_rtz_split', a, 0), ('pack_32_2x16_split', 0, b)), ('pack_32_2x16_split', ('f2f16_rtz', a), b)),
 
    (('pack_uint_2x16', ('vec2', ('pack_half_2x16_rtz_split', a, 0), ('pack_half_2x16_rtz_split', b, 0))), ('pack_half_2x16_rtz_split', a, b)),
 
@@ -3229,6 +3240,17 @@ for N in [16, 32]:
                     ((op_M_bits, (x2xN, (u2uM, aN)), b), (op, a, b)),
                     ((op_M_bits, (extract_xM, aN, 0), b), (op, a, b)),
                 ]
+
+# Match some manual extract_u8's seen in llama.cpp
+for shift in [0, 8, 16, 24]:
+    mask = ('iand', 'a@32', 0x0f0f0f0f)
+    src = mask if shift == 0 else ('ushr', mask, shift)
+    optimizations += [
+        # Remove unnecessary sign extension.
+        (('i2i32', ('u2u8', src)), ('ubitfield_extract', a, shift, 4)),
+        (('u2u32', ('u2u8', src)), ('ubitfield_extract', a, shift, 4)),
+        (('u2u8', src), ('u2u8', ('ubitfield_extract', a, shift, 4))),
+    ]
 
 def fexp2i(exp, bits):
    # Generate an expression which constructs value 2.0^exp or 0.0.
@@ -4242,19 +4264,28 @@ late_optimizations += [
 distribute_src_mods = [
    # Try to remove some spurious negations rather than pushing them down.
    (('fmul', ('fneg', a), ('fneg', b)), ('fmul', a, b)),
+   (('fmulz', ('fneg', a), ('fneg', b)), ('fmulz', a, b)),
    (('ffma', ('fneg', a), ('fneg', b), c), ('ffma', a, b, c)),
+   (('ffmaz', ('fneg', a), ('fneg', b), c), ('ffmaz', a, b, c)),
+   (('fmad', ('fneg', a), ('fneg', b), c), ('fmad', a, b, c)),
+   (('fmadz', ('fneg', a), ('fneg', b), c), ('fmadz', a, b, c)),
    (('fdot2_replicated', ('fneg', a), ('fneg', b)), ('fdot2_replicated', a, b)),
    (('fdot3_replicated', ('fneg', a), ('fneg', b)), ('fdot3_replicated', a, b)),
    (('fdot4_replicated', ('fneg', a), ('fneg', b)), ('fdot4_replicated', a, b)),
    (('fneg(is_only_used_as_float)', ('fneg', a)), a),
 
    (('fneg', ('fmul(is_used_once)', a, b)), ('fmul', ('fneg', a), b)),
+   (('fneg', ('fmulz(is_used_once,nsz)', a, b)), ('fmulz', ('fneg', a), b)),
    (('fneg', ('fmul_rtz(is_used_once)', a, b)), ('fmul_rtz', ('fneg', a), b)),
    (('fabs', ('fmul(is_used_once)', a, b)), ('fmul', ('fabs', a), ('fabs', b))),
+   (('fabs', ('fmulz(is_used_once)', a, b)), ('fmulz', ('fabs', a), ('fabs', b))),
    (('fabs', ('fmul_rtz(is_used_once)', a, b)), ('fmul_rtz', ('fabs', a), ('fabs', b))),
 
    (('fneg', ('ffma(is_used_once,nsz)', a, b, c)), ('ffma', ('fneg', a), b, ('fneg', c))),
-   (('fneg', ('flrp(is_used_once)', a, b, c)), ('flrp', ('fneg', a), ('fneg', b), c), 'true', TestStatus.XFAIL), # XFAIL is -flrp(0, -1, 0) is 0.0 instead of -0.0
+   (('fneg', ('ffmaz(is_used_once,nsz)', a, b, c)), ('ffmaz', ('fneg', a), b, ('fneg', c))),
+   (('fneg', ('fmad(is_used_once,nsz)', a, b, c)), ('fmad', ('fneg', a), b, ('fneg', c))),
+   (('fneg', ('fmadz(is_used_once,nsz)', a, b, c)), ('fmadz', ('fneg', a), b, ('fneg', c))),
+   (('fneg', ('flrp(is_used_once,nsz)', a, b, c)), ('flrp', ('fneg', a), ('fneg', b), c), 'true'),
    (('fneg', ('fadd(is_used_once,nsz)', a, b)), ('fadd', ('fneg', a), ('fneg', b))),
 
    # Note that fmin <-> fmax.  I don't think there is a way to distribute
@@ -4262,17 +4293,34 @@ distribute_src_mods = [
    (('fneg', ('fmin(is_used_once)', a, b)), ('fmax', ('fneg', a), ('fneg', b))),
    (('fneg', ('fmax(is_used_once)', a, b)), ('fmin', ('fneg', a), ('fneg', b))),
 
-   (('fneg', ('fdot2_replicated(is_used_once)', a, b)), ('fdot2_replicated', ('fneg', a), b), 'true', TestStatus.XFAIL), # -fdot2(-1, 0) replacement produces 0 instead of -0.
-   (('fneg', ('fdot3_replicated(is_used_once)', a, b)), ('fdot3_replicated', ('fneg', a), b), 'true', TestStatus.XFAIL),
-   (('fneg', ('fdot4_replicated(is_used_once)', a, b)), ('fdot4_replicated', ('fneg', a), b), 'true', TestStatus.XFAIL),
+   (('fneg', ('fdot2_replicated(is_used_once,nsz)', a, b)), ('fdot2_replicated', ('fneg', a), b), 'true'),
+   (('fneg', ('fdot3_replicated(is_used_once,nsz)', a, b)), ('fdot3_replicated', ('fneg', a), b), 'true'),
+   (('fneg', ('fdot4_replicated(is_used_once,nsz)', a, b)), ('fdot4_replicated', ('fneg', a), b), 'true'),
 
    # fdph works mostly like fdot, but to get the correct result, the negation
    # must be applied to the second source.
-   (('fneg', ('fdph_replicated(is_used_once)', a, b)), ('fdph_replicated', a, ('fneg', b)), 'true', TestStatus.XFAIL),
+   (('fneg', ('fdph_replicated(is_used_once,nsz)', a, b)), ('fdph_replicated', a, ('fneg', b)), 'true'),
+
+   (('fneg', ('frcp(is_used_once)', a)), ('frcp', ('fneg', a))),
+   (('fabs', ('frcp(is_used_once)', a)), ('frcp', ('fabs', a))),
+
+   (('fneg', ('fceil(is_used_once)', a)), ('ffloor', ('fneg', a))),
+   (('fneg', ('ffloor(is_used_once)', a)), ('fceil', ('fneg', a))),
+   (('fneg', ('ftrunc(is_used_once)', a)), ('ftrunc', ('fneg', a))),
+   (('fabs', ('ftrunc(is_used_once)', a)), ('ftrunc', ('fabs', a))),
+   (('fneg', ('fround_even(is_used_once)', a)), ('fround_even', ('fneg', a))),
+   (('fabs', ('fround_even(is_used_once)', a)), ('fround_even', ('fabs', a))),
+
 
    (('fneg', ('fsign(is_used_once)', a)), ('fsign', ('fneg', a))),
    (('fabs', ('fsign(is_used_once)', a)), ('fsign', ('fabs', a))),
+
+   # Immediately clean up some of the src mods that might have been distributed
+   # to be next to each other.  fneg(fneg(x)) is handled above.
+   (('fabs', ('fneg', a)), ('fabs', a)),
+   (('fabs', ('fabs', a)), ('fabs', a)),
 ]
+
 
 # Reassociate multiplication of mat*mat*vec. The typical case of
 # mat4*mat4*vec4 is 80 scalar multiplications, but mat4*(mat4*vec4) is only 32.

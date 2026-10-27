@@ -1028,6 +1028,7 @@ system_value("base_vertex", 1)
 system_value("instance_id", 1)
 system_value("base_instance", 1)
 system_value("draw_id", 1)
+system_value("draw_id_offset_ir3", 1)
 system_value("sample_id", 1)
 system_value("sample_pos", 2)
 # sample_pos_or_center is like sample_pos but does not imply per-sample
@@ -1118,8 +1119,14 @@ system_value("rasterization_stream", 1)
 
 system_value("frag_size", 2)
 system_value("frag_invocation_count", 1)
+
 # Whether smooth lines or polygon smoothing is enabled
 system_value("poly_line_smooth_enabled", 1, bit_sizes=[1])
+
+# Used to lower smooth lines or polygon smoothing, as an alternative to
+# sample_mask_in.
+intrinsic("load_poly_line_smooth_coverage", dest_comp=1, bit_sizes=[32],
+          flags=[CAN_ELIMINATE, CAN_REORDER])
 
 # System values for ray tracing.
 system_value("ray_launch_id", 3)
@@ -2994,7 +3001,7 @@ intrinsic("btd_retire_intel")
 
 # Intel-specific ray-tracing intrinsic
 # src[] = { globals, payload } SYNCHRONOUS=synchronous
-intrinsic("trace_ray_intel", src_comp=[1, 1], indices=[SYNCHRONOUS])
+intrinsic("trace_ray_intel", src_comp=[1, 1], dest_comp=1, bit_sizes=[32,16], indices=[SYNCHRONOUS])
 
 # System values used for ray-tracing on Intel
 system_value("ray_base_mem_addr_intel", 1, bit_sizes=[64])

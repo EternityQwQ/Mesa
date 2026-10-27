@@ -3385,6 +3385,23 @@ NIR_DEFINE_SRC_AS_CONST(double, float)
 
 #undef NIR_DEFINE_SRC_AS_CONST
 
+static inline void
+nir_instr_set_speculated(nir_instr *instr)
+{
+   if (instr->type != nir_instr_type_intrinsic)
+      return;
+
+   nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
+
+   if (nir_intrinsic_has_access(intrin) &&
+       (nir_intrinsic_access(intrin) & ACCESS_CAN_SPECULATE)) {
+      nir_intrinsic_set_access(intrin,
+                               (enum gl_access_qualifier)(
+                                  nir_intrinsic_access(intrin) |
+                                  ACCESS_IS_SPECULATED));
+   }
+}
+
 static inline bool
 nir_src_is_zero(nir_src src)
 {
@@ -7428,7 +7445,8 @@ nir_opt_preamble(nir_shader *shader,
 nir_function_impl *nir_shader_get_preamble(nir_shader *shader);
 
 bool nir_lower_point_smooth(nir_shader *shader, bool set_barycentrics);
-bool nir_lower_poly_line_smooth(nir_shader *shader, unsigned num_smooth_aa_sample);
+bool nir_lower_poly_line_smooth(nir_shader *shader, bool use_load_sample_mask_in,
+                                unsigned num_smooth_aa_sample);
 
 bool nir_mod_analysis(nir_scalar val, nir_alu_type val_type, unsigned div, unsigned *mod);
 

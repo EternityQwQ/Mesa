@@ -1466,6 +1466,25 @@ ir3_nir_set_threadsize(struct ir3_shader_variant *v, const nir_shader *s)
    }
 }
 
+static bool
+lower_draw_id(nir_builder *b, nir_intrinsic_instr *intr, void *data)
+{
+   if (intr->intrinsic != nir_intrinsic_load_draw_id)
+      return false;
+
+   b->cursor = nir_after_instr(&intr->instr);
+   nir_def_rewrite_uses_after(&intr->def,
+                        nir_iadd(b, &intr->def, nir_load_draw_id_offset_ir3(b)));
+   return true;
+}
+
+static bool
+ir3_nir_lower_draw_id(nir_shader *shader)
+{
+   return nir_shader_intrinsics_pass(shader, lower_draw_id,
+                                     nir_metadata_control_flow, NULL);
+}
+
 void
 ir3_nir_lower_variant(struct ir3_shader_variant *so,
                       const struct ir3_shader_nir_options *options,
@@ -1594,6 +1613,9 @@ ir3_nir_lower_variant(struct ir3_shader_variant *so,
    progress |= OPT(s, nir_lower_64bit_phis);
 
    progress |= OPT(s, ir3_nir_opt_subgroups, so);
+
+   if (so->compiler->options.lower_draw_id)
+      progress |= OPT(s, ir3_nir_lower_draw_id);
 
    if (so->compiler->info->props.load_shader_consts_via_preamble)
       progress |= OPT(s, ir3_nir_lower_driver_params_to_ubo, so);
@@ -1787,6 +1809,9 @@ ir3_get_driver_param_info(const nir_shader *shader,
    case nir_intrinsic_load_draw_id:
       param_info->offset = IR3_DP_VS(draw_id);
       break;
+   case nir_intrinsic_load_draw_id_offset_ir3:
+      param_info->offset = IR3_DP_VS(draw_id_offset);
+      break;
    case nir_intrinsic_load_base_instance:
       param_info->offset = IR3_DP_VS(instid_base);
       break;
@@ -1869,10 +1894,15 @@ ir3_nir_scan_driver_consts(struct ir3_compiler *compiler, nir_shader *shader,
                case nir_intrinsic_image_load:
                case nir_intrinsic_image_store:
                case nir_intrinsic_image_size:
-                  /* a4xx gets these supplied by the hw directly (maybe CP?) */
-                  if (compiler->gen == 5 &&
-                     !(intr->intrinsic == nir_intrinsic_image_load &&
-                        !(nir_intrinsic_access(intr) & ACCESS_COHERENT))) {
+                  /* a4xx gets these supplied by the hw directly (maybe CP?).
+                   *
+                   * Every image intrinsic still present here is emitted with
+                   * ldib/stib, which needs the dimensions to compute its byte
+                   * offset: an image_load that could have used the texture
+                   * path was turned into a tex instruction by
+                   * nir_lower_readonly_images_to_tex long before this runs.
+                   */
+                  if (compiler->gen == 5) {
                      idx = nir_src_as_uint(intr->src[0]);
                      if (image_dims->mask & (1 << idx))
                         break;

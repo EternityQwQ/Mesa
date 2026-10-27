@@ -113,6 +113,13 @@ etna_resource_is_render_compatible(struct pipe_screen *pscreen,
       if (!VIV_FEATURE(screen, ETNA_FEATURE_LINEAR_PE))
          return false;
 
+      /* Nothing undoes the PE's R/B swap for linear buffers. */
+      if (translate_pe_format_rb_swap(rsc->base.format, screen))
+         return false;
+
+      if (util_format_get_blocksizebits(rsc->base.format) == 64)
+         return false;
+
       if (VIV_FEATURE(screen, ETNA_FEATURE_FAST_CLEAR)) {
          unsigned int min_tilesize = etna_screen_get_tile_size(screen, TS_MODE_128B,
                                                                rsc->base.nr_samples > 1);
@@ -136,7 +143,7 @@ etna_resource_alloc_render_shadow(struct pipe_context *pctx,
    struct etna_screen *screen = ctx->screen;
    struct etna_resource *res = etna_resource(prsc);
    bool need_multitiled = screen->specs.pe_multitiled;
-   bool want_supertiled = VIV_FEATURE(screen, ETNA_FEATURE_SUPERTILED_TEXTURE);
+   bool want_supertiled = VIV_FEATURE(screen, ETNA_FEATURE_SUPER_TILED);
    struct pipe_resource templat;
    unsigned layout;
 
@@ -692,9 +699,9 @@ etna_resource_create(struct pipe_screen *pscreen,
    if (templat->bind & PIPE_BIND_DEPTH_STENCIL) {
       if (screen->specs.pe_multitiled)
          layout |= ETNA_LAYOUT_BIT_MULTI;
-      if (VIV_FEATURE(screen, ETNA_FEATURE_SUPERTILED_TEXTURE))
+      if (VIV_FEATURE(screen, ETNA_FEATURE_SUPER_TILED))
          layout |= ETNA_LAYOUT_BIT_SUPER;
-   } else if (VIV_FEATURE(screen, ETNA_FEATURE_SUPERTILED_TEXTURE) &&
+   } else if (VIV_FEATURE(screen, ETNA_FEATURE_SUPER_TILED) &&
               VIV_FEATURE(screen, ETNA_FEATURE_SUPERTILED_TEXTURE) &&
               etna_resource_hw_tileable(VIV_FEATURE(screen, ETNA_FEATURE_BLT_ENGINE), templat)) {
       layout |= ETNA_LAYOUT_BIT_SUPER;
@@ -705,7 +712,7 @@ etna_resource_create(struct pipe_screen *pscreen,
        (templat->bind & (PIPE_BIND_RENDER_TARGET | PIPE_BIND_DEPTH_STENCIL))) {
       if (screen->specs.pixel_pipes > 1 && !VIV_FEATURE(screen, ETNA_FEATURE_SINGLE_BUFFER))
          layout |= ETNA_LAYOUT_BIT_MULTI;
-      if (VIV_FEATURE(screen, ETNA_FEATURE_SUPERTILED_TEXTURE))
+      if (VIV_FEATURE(screen, ETNA_FEATURE_SUPER_TILED))
          layout |= ETNA_LAYOUT_BIT_SUPER;
    }
 
@@ -747,7 +754,7 @@ select_best_modifier(const struct etna_screen * screen,
                      const struct pipe_resource *templat,
                      const uint64_t *modifiers, const unsigned count)
 {
-   bool can_supertile = VIV_FEATURE(screen, ETNA_FEATURE_SUPERTILED_TEXTURE) &&
+   bool can_supertile = VIV_FEATURE(screen, ETNA_FEATURE_SUPER_TILED) &&
                         etna_resource_hw_tileable(VIV_FEATURE(screen, ETNA_FEATURE_BLT_ENGINE), templat);
    enum modifier_priority prio = MODIFIER_PRIORITY_INVALID;
    uint64_t best_modifier, base_modifier;

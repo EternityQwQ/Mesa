@@ -1542,6 +1542,18 @@ struct pipe_av1_enc_picture_desc
    struct pipe_enc_quality_modes quality_modes;
    struct pipe_enc_intra_refresh intra_refresh;
    struct pipe_enc_roi roi;
+   struct pipe_enc_dirty_info dirty_info;
+   struct pipe_enc_move_info move_info;
+
+   /* See PIPE_VIDEO_CAP_ENC_GPU_STATS_QP_MAP */
+   struct pipe_resource *gpu_stats_qp_map;
+   /* See PIPE_VIDEO_CAP_ENC_GPU_STATS_SATD_MAP */
+   struct pipe_resource *gpu_stats_satd_map;
+   /* See PIPE_VIDEO_CAP_ENC_GPU_STATS_RATE_CONTROL_BITS_MAP */
+   struct pipe_resource *gpu_stats_rc_bitallocation_map;
+   /* See PIPE_VIDEO_CAP_ENC_GPU_STATS_PSNR */
+   struct pipe_resource *gpu_stats_psnr;
+
    struct pipe_enc_qpmap_input_info input_qpmap_info;
    uint32_t tile_rows;
    uint32_t tile_cols;
@@ -2149,6 +2161,30 @@ struct pipe_vpp_blend
    enum pipe_video_vpp_blend_mode mode;
    /* To be used with PIPE_VIDEO_VPP_BLEND_MODE_GLOBAL_ALPHA */
    float global_alpha;
+   /* To be used with PIPE_VIDEO_VPP_BLEND_MODE_LUMA_KEY.
+    * min and max should be in range [0.0f, 1.0f]
+    */
+   float min_luma;
+   float max_luma;
+};
+
+struct pipe_video_vpp_hdr10metadata
+{
+   bool valid;
+   uint16_t display_primaries_x[3];
+   uint16_t display_primaries_y[3];
+   uint16_t white_point_x;
+   uint16_t white_point_y;
+   uint32_t max_display_mastering_luminance;
+   uint32_t min_display_mastering_luminance;
+   uint16_t max_content_light_level;
+   uint16_t max_pic_average_light_level;
+};
+
+struct pipe_video_filter_strength
+{
+   bool valid;
+   float strength;
 };
 
 struct pipe_vpp_desc
@@ -2177,8 +2213,16 @@ struct pipe_vpp_desc
    enum pipe_video_vpp_matrix_coefficients out_matrix_coefficients;
 
    enum pipe_video_vpp_filter_flag filter_flags;
-};
 
+   struct pipe_video_vpp_hdr10metadata in_hdr10metadata;
+   struct pipe_video_vpp_hdr10metadata out_hdr10metadata;
+
+   struct pipe_video_filter_strength color_balance_brightness;
+   struct pipe_video_filter_strength color_balance_contrast;
+   struct pipe_video_filter_strength color_balance_hue;
+   struct pipe_video_filter_strength color_balance_saturation;
+   struct pipe_video_filter_strength sharpening;
+};
 
 /* To be used with PIPE_VIDEO_CAP_ENC_HEVC_PREDICTION_DIRECTION */
 enum pipe_h265_enc_pred_direction

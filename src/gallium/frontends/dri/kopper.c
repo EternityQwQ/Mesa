@@ -276,6 +276,8 @@ XXX do this once swapinterval is hooked up
             drawable->textures[statts[i]] =
                screen->base.screen->resource_create_drawable(screen->base.screen, &templ, data);
             drawable->window_valid = !!drawable->textures[statts[i]];
+            if (drawable->textures[statts[i]] && (attachments & ST_ATTACHMENT_FRONT_LEFT_MASK))
+               zink_kopper_set_front(drawable->textures[statts[i]], statts[i] == ST_ATTACHMENT_FRONT_LEFT);
          }
 #ifdef VK_USE_PLATFORM_XCB_KHR
          else if (is_pixmap && statts[i] == ST_ATTACHMENT_FRONT_LEFT && !screen->is_sw) {
@@ -408,7 +410,8 @@ kopper_update_tex_buffer(struct dri_drawable *drawable,
                          struct pipe_resource *res)
 {
    struct dri_screen *screen = drawable->screen;
-   if (screen->has_dmabuf || drawable->is_window || drawable->info.bos.sType != VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR)
+   if (!screen->loader.swrast || screen->has_dmabuf || drawable->is_window ||
+       drawable->info.bos.sType != VK_STRUCTURE_TYPE_XCB_SURFACE_CREATE_INFO_KHR)
       return;
    drisw_update_tex_buffer(drawable, ctx, res);
 }
@@ -496,6 +499,8 @@ kopperSwapBuffers(struct dri_drawable *drawable, uint32_t flush_flags, int nrect
    /* have to manually swap the pointers here to make frontbuffer readback work */
    drawable->textures[ST_ATTACHMENT_BACK_LEFT] = drawable->textures[ST_ATTACHMENT_FRONT_LEFT];
    drawable->textures[ST_ATTACHMENT_FRONT_LEFT] = ptex;
+   zink_kopper_set_front(drawable->textures[ST_ATTACHMENT_BACK_LEFT], false);
+   zink_kopper_set_front(ptex, true);
 
    return 0;
 }

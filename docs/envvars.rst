@@ -953,7 +953,7 @@ Anvil(ANV) driver environment variables
   ``experimental``
     Enable experimental features
   ``no-gpl``
-    Disables `VK_KHR_graphics_pipeline_library` support
+    Disables `VK_EXT_graphics_pipeline_library` support
   ``no-sparse``
     Disables sparse support
   ``sparse-trtt``
@@ -994,7 +994,7 @@ Anvil(ANV) driver environment variables
 
    Specifies the size of the printf buffer.
 
-.. envvar:: ANV_QUEUE_OVERRIDE
+.. envvar:: anv_queue_override
 
    Override exposed queue families & counts. The variable is a comma
    separated list of queue overrides. To override the number queues:
@@ -1005,15 +1005,15 @@ Anvil(ANV) driver environment variables
    - ``v`` is for video queues with no graphics support
    - ``b`` is for copy (blitter) queues with no graphics support
 
-   For example, ``ANV_QUEUE_OVERRIDE=gc=2,c=1`` would override the number
+   For example, ``anv_queue_override=gc=2,c=1`` would override the number
    of advertised queues to be 2 queues with graphics+compute support,
    and 1 queue with compute-only support.
 
-   ``ANV_QUEUE_OVERRIDE=c=1`` would override the number of advertised
+   ``anv_queue_override=c=1`` would override the number of advertised
    queues to include 1 queue with compute-only support, but it will
    not change the number of graphics+compute queues.
 
-   ``ANV_QUEUE_OVERRIDE=gc=0,c=1`` would override the number of
+   ``anv_queue_override=gc=0,c=1`` would override the number of
    advertised queues to include 1 queue with compute-only support, and
    it would override the number of graphics+compute queues to be 0.
 
@@ -1439,6 +1439,15 @@ V3D/V3DV driver environment variables
    a comma-separated list of debug options. Use ``V3D_DEBUG=help`` to
    print a list of available options.
 
+.. envvar:: V3D_MAX_BO_CACHE_SIZE
+
+   if set, determines the maximum size (in Mb) of the cache with free BOs that
+   can be reused in v3d. Default value is 64Mb.
+
+.. envvar:: V3DV_MAX_BO_CACHE_SIZE
+
+   if set, determines the maximum size (in Mb) of the cache with free BOs that
+   can be reused in v3dv. Default value is 64Mb.
 
 .. _radv env-vars:
 
@@ -1542,8 +1551,6 @@ RADV driver environment variables
       display info at startup
    ``syncshaders``
       synchronize shaders after all draws/dispatches
-   ``zerovram``
-      initialize all memory allocated in VRAM as zero (deprecated)
    ``vs``
       Dump vertex shaders.
    ``tcs``

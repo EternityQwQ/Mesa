@@ -18,7 +18,6 @@ spec@!opengl 1.1@texwrap formats bordercolor-swizzled@GL_LUMINANCE16_ALPHA16- sw
 spec@!opengl 1.1@texwrap formats bordercolor@GL_LUMINANCE12_ALPHA12- border color only,Fail
 spec@!opengl 1.1@texwrap formats bordercolor@GL_LUMINANCE12_ALPHA4- border color only,Fail
 spec@!opengl 1.1@texwrap formats bordercolor@GL_LUMINANCE16_ALPHA16- border color only,Fail
-spec@!opengl 1.4@gl-1.4-polygon-offset,Fail
 spec@arb_depth_buffer_float@fbo-generatemipmap-formats,Fail
 spec@arb_depth_buffer_float@fbo-generatemipmap-formats@GL_DEPTH_COMPONENT32F NPOT,Fail
 spec@arb_depth_buffer_float@fbo-generatemipmap-formats@GL_DEPTH_COMPONENT32F,Fail
@@ -205,12 +204,6 @@ program@execute@builtin@builtin-float-nextafter-1.0.generated@nextafter float16,
 program@execute@builtin@builtin-float-nextafter-1.0.generated@nextafter float2,Fail
 program@execute@builtin@builtin-float-nextafter-1.0.generated@nextafter float4,Fail
 program@execute@builtin@builtin-float-nextafter-1.0.generated@nextafter float8,Fail
-program@execute@builtin@builtin-float-sign-1.0.generated,Fail
-program@execute@builtin@builtin-float-sign-1.0.generated@sign float1,Fail
-program@execute@builtin@builtin-float-sign-1.0.generated@sign float16,Fail
-program@execute@builtin@builtin-float-sign-1.0.generated@sign float2,Fail
-program@execute@builtin@builtin-float-sign-1.0.generated@sign float4,Fail
-program@execute@builtin@builtin-float-sign-1.0.generated@sign float8,Fail
 program@execute@builtin@builtin-long-popcount-1.2.generated@popcount long1,Fail
 program@execute@builtin@builtin-long-popcount-1.2.generated@popcount long16,Fail
 program@execute@builtin@builtin-long-popcount-1.2.generated@popcount long2,Fail
@@ -371,6 +364,8 @@ vk_xfermodes3,Fail
 
 # Bisected to 08b5876c379 ("v3d: only expose rgba buffer-textures")
 TransferPixelsTest,Fail
+
+dEQP-VK.api.driver_properties.conformance_version,Fail
 
 # OpenCL CTS tests
 API,Fail

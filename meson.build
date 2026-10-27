@@ -54,7 +54,8 @@ if get_option('b_lto')
 endif
 
 with_llvm = get_option('llvm')
-amd_with_llvm = with_llvm.allowed() and get_option('amd-use-llvm')
+amd_options = get_option('amd-options')
+amd_with_llvm = with_llvm.allowed() and amd_options.contains('use-llvm')
 
 with_mesa_debug = get_option('buildtype') == 'debug'
 
@@ -209,7 +210,7 @@ elif gallium_drivers.contains('all')
    ]
 endif
 
-with_amdgpu_virtio = get_option('amdgpu-virtio')
+with_amdgpu_virtio = amd_options.contains('virtio')
 with_panfrost_vdrm = get_option('panfrost-virtio')
 
 with_gallium_radeonsi = gallium_drivers.contains('radeonsi')
@@ -1226,7 +1227,7 @@ with_split_debug = get_option('split-debug') \
     error_message : 'split-debug requires the linker argument -Wl,--gdb-index')
 
 if with_split_debug.allowed() and get_option('debug')
-  add_project_arguments('-gsplit-dwarf', language : ['c', 'cpp'])
+  add_global_arguments('-gsplit-dwarf', language : ['c', 'cpp'])
   add_project_link_arguments('-Wl,--gdb-index', language : ['c', 'cpp'])
 endif
 
@@ -1676,7 +1677,7 @@ endif
 
 foreach h : ['xlocale.h', 'linux/futex.h', 'endian.h', 'dlfcn.h', 'sys/shm.h',
              'cet.h', 'pthread_np.h', 'poll.h', 'sys/inotify.h',
-             'linux/udmabuf.h']
+             'linux/udmabuf.h', 'fenv.h']
   if cc.check_header(h)
     pre_args += '-DHAVE_@0@'.format(h.to_upper().underscorify())
   endif
@@ -2250,6 +2251,7 @@ endif
 
 with_wayland_bind_display = with_platform_wayland and get_option('legacy-wayland').contains('bind-wayland-display')
 if with_platform_wayland
+  dep_wl_protocols = dependency('wayland-protocols', version : '>= 1.49', default_options: [ 'tests=false' ])
   dep_wayland_client = dependency('wayland-client', version : '>=1.18')
   dep_wayland_server = dependency('wayland-server', version : '>=1.18')
   if with_egl
