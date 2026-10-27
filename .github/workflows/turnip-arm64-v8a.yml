@@ -50,11 +50,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             ninja-build flex bison pkg-config patchelf zip file \
-            python3-venv python3-pip python3-mako python3-packaging \
-            python3-ply python3-yaml glslang-tools
+            python3-venv glslang-tools
           python3 -m venv "$RUNNER_TEMP/meson-venv"
-          "$RUNNER_TEMP/meson-venv/bin/pip" install --upgrade pip "meson>=1.4"
+          "$RUNNER_TEMP/meson-venv/bin/pip" install --upgrade pip
+          "$RUNNER_TEMP/meson-venv/bin/pip" install \
+            "meson>=1.4" mako packaging pyyaml
           echo "$RUNNER_TEMP/meson-venv/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Python build environment
+        run: |
+          python -c 'import sys, mako, packaging, yaml; print(sys.executable); print("mako", mako.__version__); print("packaging", packaging.__version__); print("pyyaml", yaml.__version__)'
 
       - name: Show toolchain
         run: |
