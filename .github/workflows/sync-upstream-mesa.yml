@@ -2,9 +2,20 @@ name: Sync upstream Mesa
 
 on:
   workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: Upstream Mesa branch or tag
+        required: true
+        default: main
+        type: string
+      dry_run:
+        description: Create the sync commit without pushing it
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
-  group: sync-upstream-${{ github.ref }}
+  group: sync-upstream-mesa
   cancel-in-progress: false
 
 permissions:
@@ -14,12 +25,17 @@ jobs:
   sync:
     if: github.ref_type == 'branch'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      UPSTREAM_URL: https://gitlab.freedesktop.org/mesa/mesa.git
+      UPSTREAM_REF: ${{ inputs.upstream_ref }}
+      DRY_RUN: ${{ inputs.dry_run }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Configure git
         run: |
@@ -27,29 +43,40 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Sync Mesa source tree
-        env:
-          UPSTREAM_URL: https://gitlab.freedesktop.org/mesa/mesa.git
-          UPSTREAM_BRANCH: main
         run: |
           set -euo pipefail
 
+          if [ -z "$UPSTREAM_REF" ]; then
+            echo "::error::upstream_ref must not be empty"
+            exit 1
+          fi
+          case "$UPSTREAM_REF" in
+            -*) echo "::error::invalid upstream_ref: $UPSTREAM_REF"; exit 1 ;;
+          esac
+
           before=$(git rev-parse --short HEAD)
 
-          if git remote get-url upstream >/dev/null 2>&1; then
-            git remote set-url upstream "$UPSTREAM_URL"
-          else
-            git remote add upstream "$UPSTREAM_URL"
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags --depth=1 --no-recurse-submodules \
+            upstream "$UPSTREAM_REF"
+          upstream_sha=$(git rev-parse --short=12 'FETCH_HEAD^{commit}')
+
+          # This repository was imported as an unrelated snapshot, so there is no
+          # common ancestor to merge. Mirror upstream's tree, then restore this
+          # repository's CI configuration exactly as it is in HEAD. Removing any
+          # upstream .github first also drops paths that exist only upstream.
+          git read-tree -u --reset 'FETCH_HEAD^{commit}'
+          git rm -r -f --ignore-unmatch --quiet -- .github
+          if git cat-file -e HEAD:.github 2>/dev/null; then
+            git checkout HEAD -- .github
           fi
 
-          git fetch --no-tags --depth=1 upstream \
-            "+refs/heads/$UPSTREAM_BRANCH:refs/remotes/upstream/$UPSTREAM_BRANCH"
-          upstream_sha=$(git rev-parse --short "upstream/$UPSTREAM_BRANCH")
-
-          # This repository was imported as an unrelated single snapshot commit,
-          # so there is no common ancestor to merge. Replace the tree with
-          # upstream's tree and keep this repository's CI configuration.
-          git read-tree -u --reset "upstream/$UPSTREAM_BRANCH"
-          git checkout HEAD -- .github
+          if ! git diff --cached --quiet HEAD -- .github; then
+            echo "::error::.github does not match HEAD after restore"
+            git diff --cached --stat HEAD -- .github || true
+            exit 1
+          fi
 
           git add -A
           if git diff --cached --quiet; then
@@ -63,12 +90,22 @@ jobs:
           fi
 
           git commit -m "Sync with upstream Mesa $upstream_sha"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
 
           {
             echo "### Upstream Mesa sync"
             echo ""
-            echo "- Previous commit: \`$before\`"
-            echo "- Upstream commit: \`$upstream_sha\`"
-            echo "- New commit: \`$(git rev-parse --short HEAD)\`"
+            echo "- Branch: \`$GITHUB_REF_NAME\`"
+            echo "- Upstream: \`$UPSTREAM_REF\` at \`$upstream_sha\`"
+            echo "- Previous: \`$before\`"
+            echo "- New: \`$(git rev-parse --short HEAD)\`"
+            echo ""
+            echo '```'
+            git show --stat --format='%h %s' HEAD
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run enabled; not pushing."
+            exit 0
+          fi
+          git push origin "HEAD:${GITHUB_REF_NAME}"
