@@ -65,7 +65,7 @@
 
 #include <sys/stat.h>
 
-#if DETECT_OS_ANDROID
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
 #include <vndk/hardware_buffer.h>
 #include "util/u_gralloc/u_gralloc.h"
 #endif
@@ -243,6 +243,7 @@ get_device_extensions(const struct v3dv_physical_device *device,
       .KHR_vertex_attribute_divisor         = true,
       .KHR_vulkan_memory_model              = true,
       .KHR_zero_initialize_workgroup_memory = true,
+      .ARM_rasterization_order_attachment_access = true,
       .EXT_4444_formats                     = true,
       .EXT_attachment_feedback_loop_layout  = true,
       .EXT_border_color_swizzle             = true,
@@ -273,6 +274,7 @@ get_device_extensions(const struct v3dv_physical_device *device,
       .EXT_pipeline_creation_cache_control  = true,
       .EXT_pipeline_creation_feedback       = true,
       .EXT_pipeline_robustness              = true,
+      .EXT_rasterization_order_attachment_access = true,
       .EXT_robustness2                      = true,
       .EXT_primitive_topology_list_restart  = true,
       .EXT_private_data                     = true,
@@ -293,7 +295,7 @@ get_device_extensions(const struct v3dv_physical_device *device,
       .GOOGLE_display_timing = wsi_instance_supports_google_display_timing(device->vk.instance, &v3dv_instance->drirc.options),
 #endif
    };
-#if DETECT_OS_ANDROID
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
    struct u_gralloc *gralloc = vk_android_get_ugralloc();
    if (gralloc && u_gralloc_get_type(gralloc) != U_GRALLOC_TYPE_FALLBACK) {
       ext->ANDROID_external_memory_android_hardware_buffer = true;
@@ -501,6 +503,11 @@ get_features(const struct v3dv_physical_device *physical_device,
 
       /* VK_EXT_color_write_enable */
       .colorWriteEnable = true,
+
+      /* VK_EXT_rasterization_order_attachment_access */
+      .rasterizationOrderColorAttachmentAccess = true,
+      .rasterizationOrderDepthAttachmentAccess = true,
+      .rasterizationOrderStencilAttachmentAccess = true,
 
       /* VK_EXT_extended_dynamic_state */
       .extendedDynamicState = true,
@@ -1223,9 +1230,9 @@ get_device_properties(const struct v3dv_physical_device *device,
       .driverID = VK_DRIVER_ID_MESA_V3DV,
       .conformanceVersion = {
          .major = 1,
-         .minor = 3,
-         .subminor = 8,
-         .patch = 3,
+         .minor = 4,
+         .subminor = 6,
+         .patch = 2,
       },
       .supportedDepthResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT,
       .supportedStencilResolveModes = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT,
@@ -1357,7 +1364,7 @@ get_device_properties(const struct v3dv_physical_device *device,
       /* VkPhysicalDevicePerformanceQueryPropertiesKHR */
       .allowCommandBufferQueryCopies = true,
 
-#if DETECT_OS_ANDROID
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
       /* VkPhysicalDevicePresentationPropertiesANDROID */
       .sharedImage = !!vk_android_get_front_buffer_usage(),
 #endif
@@ -2626,7 +2633,7 @@ v3dv_AllocateMemory(VkDevice _device,
       if (result == VK_SUCCESS)
          close(fd_info->fd);
    } else if (mem->vk.ahardware_buffer) {
-#if DETECT_OS_ANDROID
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
       const native_handle_t *handle = AHardwareBuffer_getNativeHandle(mem->vk.ahardware_buffer);
       assert(handle->numFds > 0);
       size_t size = lseek(handle->data[0], 0, SEEK_END);
@@ -2905,7 +2912,7 @@ v3dv_BindImageMemory2(VkDevice _device,
 
    for (uint32_t i = 0; i < bindInfoCount; i++) {
       set_bind_status(pBindInfos[i].pNext, VK_SUCCESS);
-#if DETECT_OS_ANDROID
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
       V3DV_FROM_HANDLE(v3dv_image, image, pBindInfos[i].image);
       if (vk_image_is_android_hardware_buffer(&image->vk) ||
           vk_image_is_android_native_buffer_alias(&image->vk)) {
@@ -2974,7 +2981,7 @@ v3dv_BindImageMemory2(VkDevice _device,
          vk_find_struct_const(pBindInfos[i].pNext,
                               BIND_IMAGE_MEMORY_SWAPCHAIN_INFO_KHR);
       if (swapchain_info && swapchain_info->swapchain) {
-#if !DETECT_OS_ANDROID
+#ifndef VK_USE_PLATFORM_ANDROID_KHR
          VkDeviceMemory wsi_mem_handle = wsi_common_get_memory(
             swapchain_info->swapchain, swapchain_info->imageIndex);
          VkBindImageMemoryInfo swapchain_bind = {

@@ -359,6 +359,7 @@ impl RegAlignConstraint {
     }
 
     fn for_align(mul: u8, offset: u8) -> Self {
+        debug_assert!(offset < mul);
         let mask = match mul {
             1 => 0xff,
             2 => 0x55 << offset,
@@ -667,7 +668,7 @@ impl SSAVecRepr {
     }
 
     fn set_affinity(&self, byte: u8, ssa: &SSAValue, a: &mut SSAAffinity) {
-        a.add_align(RegAlignConstraint::for_align(self.size.min(8), byte));
+        a.add_align(RegAlignConstraint::for_align(self.size.min(8), byte % 8));
 
         let repr = self.repr.as_ref().unwrap();
         if self.comps > 1 && a.vec_size == 0 {
@@ -1384,7 +1385,8 @@ impl LocalRegAlloc<'_> {
                     // Increment the round-robin past the whole vector
                     if self.arena.round_robin {
                         self.search_start.set(
-                            bytes.start + u16::from(a.vec_size) - vec_offset,
+                            (bytes.start + u16::from(a.vec_size) - vec_offset)
+                                .min(self.arena.limit()),
                         );
                     }
 

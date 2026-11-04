@@ -2085,14 +2085,14 @@ static inline nir_cmat_reduce nir_cmat_call_reduce_flags(nir_cmat_call_instr *ca
 static inline struct nir_cmat_tensor_load nir_cmat_call_tensor_load_info(nir_cmat_call_instr *call)
 {
    struct nir_cmat_tensor_load tl;
-   STATIC_ASSERT(sizeof(call->const_index[NIR_CMAT_CALL_LAYOUT_OFFSET]) * 3 == sizeof(tl));
+   STATIC_ASSERT(sizeof(call->const_index[NIR_CMAT_CALL_LAYOUT_OFFSET]) * 3 >= sizeof(tl));
    memcpy(&tl, &call->const_index[NIR_CMAT_CALL_LAYOUT_OFFSET], sizeof(tl));
    return tl;
 }
 
 static inline void nir_cmat_call_set_tensor_load_info(nir_cmat_call_instr *call, struct nir_cmat_tensor_load tl)
 {
-   STATIC_ASSERT(sizeof(call->const_index[NIR_CMAT_CALL_LAYOUT_OFFSET]) * 3 == sizeof(tl));
+   STATIC_ASSERT(sizeof(call->const_index[NIR_CMAT_CALL_LAYOUT_OFFSET]) * 3 >= sizeof(tl));
    memcpy(&call->const_index[NIR_CMAT_CALL_LAYOUT_OFFSET], &tl, sizeof(tl));
 }
 
@@ -4273,9 +4273,17 @@ nir_cf_list_is_empty_block(struct exec_list *cf_list)
    return false;
 }
 
+typedef enum ENUM_PACKED nir_parameter_mode {
+   nir_parameter_in = 0,
+   nir_parameter_out,
+   nir_parameter_inout,
+} nir_parameter_mode;
+
 typedef struct nir_parameter {
    uint8_t num_components;
    uint8_t bit_size;
+
+   nir_parameter_mode mode;
 
    /* True if this parameter is a deref used for returning values */
    bool is_return;
@@ -4287,8 +4295,6 @@ typedef struct nir_parameter {
     * otherwise.
     */
    bool is_uniform;
-
-   nir_variable_mode mode;
 
    /* Drivers may optionally stash flags here describing the parameter.
     * For example, this might encode whether the driver expects the value

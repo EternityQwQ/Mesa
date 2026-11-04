@@ -68,7 +68,7 @@
 #include "util/set.h"
 #include "util/sparse_array.h"
 #include "util/u_atomic.h"
-#if DETECT_OS_ANDROID
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
 #include "util/u_gralloc/u_gralloc.h"
 #endif
 #include "util/u_vector.h"
@@ -7208,6 +7208,8 @@ struct anv_video_rc_state {
    /* H.264 and H.265 rate control flag bits share the same values. */
    uint32_t rc_flags;
    uint32_t frame_counter;
+   uint32_t brc_init_frame;
+   bool brc_reset;
 };
 
 struct anv_video_session {
