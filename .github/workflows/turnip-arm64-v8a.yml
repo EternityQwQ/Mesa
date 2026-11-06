@@ -157,7 +157,6 @@ jobs:
           name: turnip-arm64-v8a-${{ matrix.kmd }}
           path: turnip-arm64-v8a-${{ matrix.kmd }}.zip
           if-no-files-found: error
-          retention-days: 14
 
       - name: Upload Meson logs on failure
         if: failure()
