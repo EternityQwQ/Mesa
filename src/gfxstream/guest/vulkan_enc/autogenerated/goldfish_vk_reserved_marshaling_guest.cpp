@@ -1673,7 +1673,7 @@ void reservedmarshal_VkGraphicsPipelineCreateInfo(VulkanStreamGuest* vkStream,
     if (vkStream->getFeatureBits() & VULKAN_STREAM_FEATURE_IGNORED_HANDLES_BIT) {
         hasRasterization =
             ((((0 == forMarshaling->pRasterizationState))
-                  ? (0)
+                  ? (1)
                   : (!((*(forMarshaling->pRasterizationState)).rasterizerDiscardEnable))) ||
              (((0 == forMarshaling->pDynamicState))
                   ? (0)
@@ -5878,6 +5878,24 @@ void reservedmarshal_VkPipelineExecutableInternalRepresentationKHR(
 }
 
 #endif
+#ifdef VK_KHR_pipeline_library
+void reservedmarshal_VkPipelineLibraryCreateInfoKHR(
+    VulkanStreamGuest* vkStream, VkStructureType rootType,
+    const VkPipelineLibraryCreateInfoKHR* forMarshaling, uint8_t** ptr) {
+    writeStreamBytes(ptr, &forMarshaling->sType, sizeof(VkStructureType));
+    if (rootType == VK_STRUCTURE_TYPE_MAX_ENUM) {
+        rootType = forMarshaling->sType;
+    }
+    reservedmarshal_extension_struct(vkStream, rootType, forMarshaling->pNext, ptr);
+    writeStreamBytes(ptr, &forMarshaling->libraryCount, sizeof(uint32_t));
+    if (forMarshaling->libraryCount) {
+        for (uint32_t k = 0; k < forMarshaling->libraryCount; ++k) {
+            writeStreamVal(ptr, gfxstream_vk_pipeline_to_host_u64(forMarshaling->pLibraries[k]));
+        }
+    }
+}
+
+#endif
 #ifdef VK_KHR_maintenance6
 void reservedmarshal_VkSetDescriptorBufferOffsetsInfoEXT(
     VulkanStreamGuest* vkStream, VkStructureType rootType,
@@ -6957,6 +6975,25 @@ void reservedmarshal_VkGuestCapabilitiesGOOGLE(VulkanStreamGuest* vkStream,
     }
     reservedmarshal_extension_struct(vkStream, rootType, forMarshaling->pNext, ptr);
     writeStreamBytes(ptr, &forMarshaling->capabilities, sizeof(VkGuestCapabilityFlagsGOOGLE));
+}
+
+void reservedmarshal_VkHostPointerResolveGOOGLE(VulkanStreamGuest* vkStream,
+                                                VkStructureType rootType,
+                                                const VkHostPointerResolveGOOGLE* forMarshaling,
+                                                uint8_t** ptr) {
+    writeStreamBytes(ptr, &forMarshaling->sType, sizeof(VkStructureType));
+    if (rootType == VK_STRUCTURE_TYPE_MAX_ENUM) {
+        rootType = forMarshaling->sType;
+    }
+    reservedmarshal_extension_struct(vkStream, rootType, forMarshaling->pNext, ptr);
+    writeStreamBytes(ptr, &forMarshaling->pointerSize, sizeof(uint32_t));
+    putBe64WithStreamPtr(ptr, (uint64_t)(uintptr_t)forMarshaling->pHostPointer);
+    if (forMarshaling->pHostPointer) {
+        if (forMarshaling->pointerSize > 0) {
+            writeStreamBytes(ptr, forMarshaling->pHostPointer,
+                             forMarshaling->pointerSize * sizeof(uint8_t));
+        }
+    }
 }
 
 void reservedmarshal_VkDebugMetadataGOOGLE(VulkanStreamGuest* vkStream, VkStructureType rootType,
@@ -8075,6 +8112,14 @@ void reservedmarshal_extension_struct(VulkanStreamGuest* vkStream, VkStructureTy
             break;
         }
 #endif
+#ifdef VK_KHR_pipeline_library
+        case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR: {
+            reservedmarshal_VkPipelineLibraryCreateInfoKHR(
+                vkStream, rootType,
+                reinterpret_cast<const VkPipelineLibraryCreateInfoKHR*>(structExtension), ptr);
+            break;
+        }
+#endif
 #ifdef VK_KHR_maintenance7
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR: {
             reservedmarshal_VkPhysicalDeviceMaintenance7FeaturesKHR(
@@ -8683,6 +8728,12 @@ void reservedmarshal_extension_struct(VulkanStreamGuest* vkStream, VkStructureTy
             reservedmarshal_VkGuestCapabilitiesGOOGLE(
                 vkStream, rootType,
                 reinterpret_cast<const VkGuestCapabilitiesGOOGLE*>(structExtension), ptr);
+            break;
+        }
+        case VK_STRUCTURE_TYPE_HOST_POINTER_RESOLVE_GOOGLE: {
+            reservedmarshal_VkHostPointerResolveGOOGLE(
+                vkStream, rootType,
+                reinterpret_cast<const VkHostPointerResolveGOOGLE*>(structExtension), ptr);
             break;
         }
 #endif

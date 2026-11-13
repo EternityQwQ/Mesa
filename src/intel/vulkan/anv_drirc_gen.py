@@ -233,7 +233,12 @@ def declare_options(android_version):
            EV(2, "nir_opt_gcm, global code motion")],
           "Which code motion pass runs in the NIR optimization loop",
           c_name="code_motion"),
-
+        I("intel_tbimr_poly_trigger_width", 0, 0, 15,
+          "Specify the Poly Trigger Width of TBIMR (GFX35+)",
+          c_name="tbimr_poly_trigger_width"),
+        I("intel_tbimr_poly_trigger_height", 0, 0, 15,
+          "Specify the Poly Trigger Height of TBIMR (GFX35+)",
+          c_name="tbimr_poly_trigger_height"),
         B("force_guc_low_latency", False,
           "Enable low latency GuC strategy.",
           c_name="guc_low_latency"),
@@ -282,6 +287,17 @@ def declare_options(android_version):
         I("anv_rt_tile_y", 0, 0, 64,
           "Ray tracing dispatch tile height (0 for automatic)",
           c_name="rt_tile_y"),
+        E("anv_force_preferred_walk_order", 0, 0, 6,
+          [EV(0, "use the compiled default walk order"),
+           EV(1, "force XYZ (linear) walk order"),
+           EV(2, "force XZY walk order"),
+           EV(3, "force YXZ walk order"),
+           EV(4, "force YZX walk order"),
+           EV(5, "force ZXY walk order"),
+           EV(6, "force ZYX walk order")],
+          "Force preferred walk order for compute shader invocations "
+          "(enum intel_compute_walk_order value + 1, 0 = compiled default)",
+          c_name="force_preferred_walk_order"),
     ]
 
     feature_options = [

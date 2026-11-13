@@ -2547,6 +2547,7 @@ static void si_set_framebuffer_state(struct pipe_context *ctx,
    sctx->framebuffer.any_dst_linear = false;
    sctx->framebuffer.CB_has_shader_readable_metadata = false;
    sctx->framebuffer.DB_has_shader_readable_metadata = false;
+   sctx->framebuffer.DB_meta_pipe_misaligned = false;
    sctx->framebuffer.all_DCC_pipe_aligned = true;
    sctx->framebuffer.has_dcc_msaa = false;
    sctx->framebuffer.min_bytes_per_pixel = 0;
@@ -2619,8 +2620,10 @@ static void si_set_framebuffer_state(struct pipe_context *ctx,
       si_init_depth_surface(sctx);
 
       if (sctx->gfx_level < GFX12 &&
-          vi_tc_compat_htile_enabled(zstex, state->zsbuf.level, PIPE_MASK_ZS))
+          vi_tc_compat_htile_enabled(zstex, state->zsbuf.level, PIPE_MASK_ZS)) {
          sctx->framebuffer.DB_has_shader_readable_metadata = true;
+         sctx->framebuffer.DB_meta_pipe_misaligned = zstex->htile_pipe_misaligned;
+      }
 
       /* Update the minimum but don't keep 0. */
       if (!sctx->framebuffer.min_bytes_per_pixel ||
@@ -3495,7 +3498,7 @@ static void si_set_min_samples(struct pipe_context *ctx, unsigned min_samples)
 
 /**
  * Build the sampler view descriptor for a buffer texture.
- * @param state 256-bit descriptor; only the high 128 bits are filled in
+ * @param state 256-bit descriptor
  */
 void si_make_buffer_descriptor(struct si_screen *screen, struct si_resource *buf,
                                enum pipe_format format, unsigned offset, unsigned num_elements,

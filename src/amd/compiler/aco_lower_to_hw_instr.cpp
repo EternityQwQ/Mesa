@@ -2917,6 +2917,9 @@ lower_to_hw_instr(Program* program)
                break;
             }
             case aco_opcode::p_end_with_regs: {
+               if (!instr->operands[0].isUndefined())
+                  bld.sop1(Builder::s_mov, Definition(exec, bld.lm), instr->operands[0]);
+               bld.insert(std::move(instr));
                end_with_regs_block_index = block->index;
                break;
             }
@@ -3069,14 +3072,12 @@ lower_to_hw_instr(Program* program)
       exit_block->linear_preds.push_back(end_with_regs_block->index);
       end_with_regs_block->linear_succs.push_back(exit_block->index);
 
+      assert(end_with_regs_block->instructions.back()->opcode == aco_opcode::p_end_with_regs);
+      exit_block->instructions.push_back(std::move(end_with_regs_block->instructions.back()));
+      end_with_regs_block->instructions.pop_back();
+
       Builder bld(program, end_with_regs_block);
       bld.sopp(aco_opcode::s_branch, exit_block->index);
-
-      /* For insert waitcnt pass to add waitcnt in exit block, otherwise waitcnt will be added
-       * after the s_branch which won't be executed.
-       */
-      end_with_regs_block->kind &= ~block_kind_end_with_regs;
-      exit_block->kind |= block_kind_end_with_regs;
    }
 
    program->progress = CompilationProgress::after_lower_to_hw;

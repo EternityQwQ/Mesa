@@ -65,6 +65,7 @@ _compiler_rust_args = [
 
 _compiler_bindgen_args = [
   bindgen_output_args,
+  util_rs_bindgen_args,
   '--allowlist-var', 'NIR_.*',
   '--allowlist-var', 'nir_.*_infos',
   '--allowlist-var', 'rust_.*',
@@ -107,11 +108,13 @@ _compiler_bindings_rs = rust.bindgen(
   output_inline_wrapper : 'bindings.c',
   c_args : [
     pre_args,
+    bindgen_c_args,
   ],
   args : _compiler_bindgen_args,
   dependencies : [
     idep_nir_headers,
     idep_mesautil,
+    idep_mesa_util_rs,
   ],
 )
 
@@ -149,7 +152,10 @@ _libcompiler_rs = static_library(
   _compiler_rs_sources,
   gnu_symbol_visibility : 'hidden',
   rust_abi : 'rust',
-  dependencies: [_idep_libcompiler_c],
+  dependencies: [
+    _idep_libcompiler_c,
+    idep_mesa_util_rs
+  ],
   link_with: [_libcompiler_bindings],
   rust_args: _compiler_rust_args,
 )

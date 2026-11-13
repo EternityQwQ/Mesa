@@ -2426,7 +2426,7 @@ radv_get_vgt_outprim_type(const struct radv_cmd_buffer *cmd_buffer)
    return radv_conv_prim_to_gs_out(pdev->info.gfx_level, d->vk.ia.primitive_topology, last_vgt_shader->info.is_ngg);
 }
 
-static ALWAYS_INLINE VkLineRasterizationModeEXT
+static ALWAYS_INLINE VkLineRasterizationMode
 radv_get_line_mode(const struct radv_cmd_buffer *cmd_buffer)
 {
    const struct radv_dynamic_state *d = &cmd_buffer->state.dynamic;
@@ -2439,7 +2439,7 @@ radv_get_rasterization_samples(struct radv_cmd_buffer *cmd_buffer)
 {
    const struct radv_dynamic_state *d = &cmd_buffer->state.dynamic;
 
-   const VkLineRasterizationModeEXT line_mode = cmd_buffer->state.line_rast_mode;
+   const VkLineRasterizationMode line_mode = cmd_buffer->state.line_rast_mode;
 
    if (line_mode == VK_LINE_RASTERIZATION_MODE_BRESENHAM) {
       /* From the Vulkan spec 1.3.221:
@@ -2469,15 +2469,9 @@ radv_is_sample_shading_enabled(struct radv_cmd_buffer *cmd_buffer, float *min_sa
    if (min_sample_shading)
       *min_sample_shading = 1.0f;
 
-   /* If the PS requires sample shading for inputs,
-    * min_sample_shading is overwritten to 1.0.
-    */
-   if (ps && ps->info.ps.uses_sample_shading)
-      return true;
-
-   if (cmd_buffer->state.ms.sample_shading_enable) {
+   if (ps && ps->info.ps.uses_sample_shading) {
       if (min_sample_shading)
-         *min_sample_shading = cmd_buffer->state.ms.min_sample_shading;
+         *min_sample_shading = ps->info.ps.min_sample_shading;
       return true;
    }
 
@@ -8155,6 +8149,13 @@ radv_dst_access_flush(struct radv_cmd_buffer *cmd_buffer, VkPipelineStageFlags2 
          flush_bits |= AC_BARRIER_INV_L2;
    }
 
+   /* Image stores with DCC/HTILE read metadata through L2. */
+   if (dst_flags & VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT && flush_L2_metadata) {
+      flush_bits |= AC_BARRIER_INV_L2_METADATA;
+      if (!image_is_coherent)
+         flush_bits |= AC_BARRIER_INV_L2;
+   }
+
    if (dst_flags & VK_ACCESS_2_COMMAND_PREPROCESS_READ_BIT_EXT) {
       flush_bits |= AC_BARRIER_INV_VMEM;
       if (pdev->info.gfx_level < GFX9)
@@ -8787,7 +8788,7 @@ radv_init_push_descriptor_set(struct radv_cmd_buffer *cmd_buffer, struct radv_de
 }
 
 static void
-radv_push_descriptor_set(struct radv_cmd_buffer *cmd_buffer, const VkPushDescriptorSetInfoKHR *pPushDescriptorSetInfo,
+radv_push_descriptor_set(struct radv_cmd_buffer *cmd_buffer, const VkPushDescriptorSetInfo *pPushDescriptorSetInfo,
                          VkPipelineBindPoint bind_point)
 {
    VK_FROM_HANDLE(radv_pipeline_layout, layout, pPushDescriptorSetInfo->layout);
@@ -8819,7 +8820,7 @@ radv_push_descriptor_set(struct radv_cmd_buffer *cmd_buffer, const VkPushDescrip
 }
 
 VKAPI_ATTR void VKAPI_CALL
-radv_CmdPushDescriptorSet2KHR(VkCommandBuffer commandBuffer, const VkPushDescriptorSetInfoKHR *pPushDescriptorSetInfo)
+radv_CmdPushDescriptorSet2(VkCommandBuffer commandBuffer, const VkPushDescriptorSetInfo *pPushDescriptorSetInfo)
 {
    VK_FROM_HANDLE(radv_cmd_buffer, cmd_buffer, commandBuffer);
 
@@ -8837,8 +8838,8 @@ radv_CmdPushDescriptorSet2KHR(VkCommandBuffer commandBuffer, const VkPushDescrip
 }
 
 VKAPI_ATTR void VKAPI_CALL
-radv_CmdPushDescriptorSetWithTemplate2KHR(
-   VkCommandBuffer commandBuffer, const VkPushDescriptorSetWithTemplateInfoKHR *pPushDescriptorSetWithTemplateInfo)
+radv_CmdPushDescriptorSetWithTemplate2(VkCommandBuffer commandBuffer,
+                                       const VkPushDescriptorSetWithTemplateInfo *pPushDescriptorSetWithTemplateInfo)
 {
    VK_FROM_HANDLE(radv_cmd_buffer, cmd_buffer, commandBuffer);
    VK_FROM_HANDLE(radv_pipeline_layout, layout, pPushDescriptorSetWithTemplateInfo->layout);
@@ -9018,31 +9019,6 @@ radv_mark_descriptors_dirty(struct radv_cmd_buffer *cmd_buffer, VkPipelineBindPo
       descriptors_state->dirty_dynamic = true;
 
    descriptors_state->dirty_heaps |= descriptors_state->valid_heaps;
-}
-
-static void
-radv_bind_multisample_state(struct radv_cmd_buffer *cmd_buffer, const struct radv_multisample_state *ms)
-{
-   const struct radv_device *device = radv_cmd_buffer_device(cmd_buffer);
-   const struct radv_physical_device *pdev = radv_device_physical(device);
-
-   if (cmd_buffer->state.ms.sample_shading_enable != ms->sample_shading_enable) {
-      cmd_buffer->state.ms.sample_shading_enable = ms->sample_shading_enable;
-      cmd_buffer->state.dirty |= RADV_CMD_DIRTY_RAST_SAMPLES_STATE | RADV_CMD_DIRTY_MSAA_STATE;
-      if (pdev->info.gfx_level >= GFX10_3)
-         cmd_buffer->state.dirty |= RADV_CMD_DIRTY_FSR_STATE;
-      if (pdev->info.gfx_level >= GFX9)
-         cmd_buffer->state.dirty |= RADV_CMD_DIRTY_BINNING_STATE;
-   }
-
-   if (ms->sample_shading_enable) {
-      if (cmd_buffer->state.ms.min_sample_shading != ms->min_sample_shading) {
-         cmd_buffer->state.ms.min_sample_shading = ms->min_sample_shading;
-         cmd_buffer->state.dirty |= RADV_CMD_DIRTY_RAST_SAMPLES_STATE | RADV_CMD_DIRTY_MSAA_STATE;
-         if (pdev->info.gfx_level >= GFX9)
-            cmd_buffer->state.dirty |= RADV_CMD_DIRTY_BINNING_STATE;
-      }
-   }
 }
 
 static void
@@ -9384,6 +9360,12 @@ radv_bind_fragment_shader(struct radv_cmd_buffer *cmd_buffer, const struct radv_
          cmd_buffer->state.dirty |= RADV_CMD_DIRTY_BINNING_STATE;
    }
 
+   if (!previous_ps || previous_ps->info.ps.min_sample_shading != ps->info.ps.min_sample_shading) {
+      cmd_buffer->state.dirty |= RADV_CMD_DIRTY_RAST_SAMPLES_STATE | RADV_CMD_DIRTY_MSAA_STATE;
+      if (gfx_level >= GFX9)
+         cmd_buffer->state.dirty |= RADV_CMD_DIRTY_BINNING_STATE;
+   }
+
    if (gfx_level >= GFX10_3 && (!previous_ps || previous_ps->info.ps.disallow_force_vrs_per_vertex !=
                                                    ps->info.ps.disallow_force_vrs_per_vertex))
       cmd_buffer->state.dirty |= RADV_CMD_DIRTY_FSR_STATE;
@@ -9668,8 +9650,6 @@ radv_bind_graphics_pipeline(struct radv_cmd_buffer *cmd_buffer, struct radv_grap
    const struct radv_shader *ps = radv_get_shader(graphics_pipeline->base.shaders, MESA_SHADER_FRAGMENT);
 
    radv_bind_fragment_output_state(cmd_buffer, ps, NULL, graphics_pipeline->custom_blend_mode);
-
-   radv_bind_multisample_state(cmd_buffer, &graphics_pipeline->ms);
 
    radv_bind_custom_blend_mode(cmd_buffer, graphics_pipeline->custom_blend_mode);
 
@@ -11446,6 +11426,8 @@ radv_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pRe
 {
    VK_FROM_HANDLE(radv_cmd_buffer, cmd_buffer, commandBuffer);
 
+   radv_suspend_conditional_rendering(cmd_buffer);
+
    /* From the Vulkan spec 1.4.358:
     *
     * "Until this command is called, mappings in the command buffer state are treated as each color
@@ -11470,6 +11452,8 @@ radv_CmdBeginRendering(VkCommandBuffer commandBuffer, const VkRenderingInfo *pRe
    radv_CmdSetRenderingInputAttachmentIndices(commandBuffer, &ria_info);
 
    radv_cmd_buffer_begin_rendering(cmd_buffer, pRenderingInfo);
+
+   radv_resume_conditional_rendering(cmd_buffer);
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -11477,7 +11461,9 @@ radv_CmdEndRendering2KHR(VkCommandBuffer commandBuffer, const VkRenderingEndInfo
 {
    VK_FROM_HANDLE(radv_cmd_buffer, cmd_buffer, commandBuffer);
 
+   radv_suspend_conditional_rendering(cmd_buffer);
    radv_cmd_buffer_end_rendering(cmd_buffer, pRenderingEndInfo);
+   radv_resume_conditional_rendering(cmd_buffer);
 }
 
 VKAPI_ATTR void VKAPI_CALL
@@ -13167,7 +13153,7 @@ radv_should_enable_late_z(struct radv_cmd_buffer *cmd_buffer)
    const struct radv_dynamic_state *d = &cmd_buffer->state.dynamic;
    const struct radv_rendering_state *render = &cmd_buffer->state.render;
    const struct radv_shader *ps = cmd_buffer->state.shaders[MESA_SHADER_FRAGMENT];
-   const VkLineRasterizationModeEXT line_rast_mode = cmd_buffer->state.line_rast_mode;
+   const VkLineRasterizationMode line_rast_mode = cmd_buffer->state.line_rast_mode;
 
    /* Enable late-Z when a depth/stencil attachment is used inside feedback loops to make sure
     * shader invocations read the correct value.
@@ -13458,7 +13444,7 @@ radv_emit_raster_state(struct radv_cmd_buffer *cmd_buffer)
    const struct radv_physical_device *pdev = radv_device_physical(device);
    const struct radv_dynamic_state *d = &cmd_buffer->state.dynamic;
    const bool depth_clip_enable = cmd_buffer->state.depth_clip_enable;
-   const VkLineRasterizationModeEXT line_rast_mode = cmd_buffer->state.line_rast_mode;
+   const VkLineRasterizationMode line_rast_mode = cmd_buffer->state.line_rast_mode;
 
    /* GFX9 chips fail linestrip CTS tests unless this is set to 0 = no reset */
    uint32_t auto_reset_cntl = (pdev->info.gfx_level == GFX9) ? 0 : 2;
@@ -13669,7 +13655,7 @@ radv_emit_msaa_state(struct radv_cmd_buffer *cmd_buffer)
    const uint32_t sample_mask = d->vk.ms.sample_mask | ((uint32_t)d->vk.ms.sample_mask << 16);
    const bool enable_1x_user_sample_locs =
       d->vk.ms.sample_locations_enable && d->sample_location.count > 0 && d->sample_location.per_pixel == 1;
-   const VkLineRasterizationModeEXT line_rast_mode = cmd_buffer->state.line_rast_mode;
+   const VkLineRasterizationMode line_rast_mode = cmd_buffer->state.line_rast_mode;
    const bool msaa_enable = rasterization_samples > 1 || enable_1x_user_sample_locs;
    unsigned log_samples = util_logbase2(rasterization_samples);
    unsigned pa_sc_conservative_rast = 0;
@@ -14103,7 +14089,7 @@ radv_emit_all_graphics_states(struct radv_cmd_buffer *cmd_buffer, bool indexed_d
          cmd_buffer->state.dirty |= RADV_CMD_DIRTY_GUARDBAND;
       }
 
-      const VkLineRasterizationModeEXT line_rast_mode = radv_get_line_mode(cmd_buffer);
+      const VkLineRasterizationMode line_rast_mode = radv_get_line_mode(cmd_buffer);
 
       if (cmd_buffer->state.line_rast_mode != line_rast_mode) {
          cmd_buffer->state.line_rast_mode = line_rast_mode;
@@ -15147,7 +15133,7 @@ radv_CmdExecuteGeneratedCommandsEXT(VkCommandBuffer commandBuffer, VkBool32 isPr
     * starts.
     */
    if (radv_dgc_get_shader(pipeline_info, eso_info, MESA_SHADER_TASK)) {
-      radv_gang_barrier(cmd_buffer, VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_NV,
+      radv_gang_barrier(cmd_buffer, VK_PIPELINE_STAGE_2_COMMAND_PREPROCESS_BIT_EXT,
                         VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT);
    }
 
@@ -16109,7 +16095,7 @@ radv_handle_depth_image_transition(struct radv_cmd_buffer *cmd_buffer, struct ra
    struct radv_device *device = radv_cmd_buffer_device(cmd_buffer);
    const struct radv_physical_device *pdev = radv_device_physical(device);
 
-   if (!radv_htile_enabled(image, range->baseMipLevel) && !radv_image_has_hiz(image))
+   if (!radv_htile_enabled(image, range->baseMipLevel) && (pdev->info.gfx_level < GFX12 || !radv_image_has_hiz(image)))
       return;
 
    if (src_layout == VK_IMAGE_LAYOUT_UNDEFINED || src_layout == VK_IMAGE_LAYOUT_ZERO_INITIALIZED_EXT) {
@@ -16400,7 +16386,7 @@ radv_handle_color_image_transition(struct radv_cmd_buffer *cmd_buffer, struct ra
    }
 
    if (needs_fmask_color_expand)
-      radv_fmask_color_expand(cmd_buffer, image, range);
+      radv_fmask_color_expand(cmd_buffer, image, dst_layout, range, dst_queue_mask);
 
    if (needs_dcc_retile)
       radv_retile_dcc(cmd_buffer, image);
@@ -16568,6 +16554,7 @@ radv_barrier(struct radv_cmd_buffer *cmd_buffer, uint32_t dep_count, const VkDep
       radv_mark_noncoherent_rb(cmd_buffer);
 
    radv_describe_barrier_start(cmd_buffer, reason);
+   radv_suspend_conditional_rendering(cmd_buffer);
 
    for (uint32_t dep_idx = 0; dep_idx < dep_count; dep_idx++) {
       const VkDependencyInfo *dep_info = &dep_infos[dep_idx];
@@ -16701,6 +16688,7 @@ radv_barrier(struct radv_cmd_buffer *cmd_buffer, uint32_t dep_count, const VkDep
 
    cmd_buffer->state.flush_bits |= dst_flush_bits;
 
+   radv_resume_conditional_rendering(cmd_buffer);
    radv_describe_barrier_end(cmd_buffer);
 }
 
@@ -17624,8 +17612,6 @@ radv_reset_pipeline_state(struct radv_cmd_buffer *cmd_buffer, VkPipelineBindPoin
          cmd_buffer->state.gs_copy_shader = NULL;
          cmd_buffer->state.last_vgt_shader = NULL;
          cmd_buffer->state.emitted_vs_prolog = NULL;
-         cmd_buffer->state.ms.sample_shading_enable = false;
-         cmd_buffer->state.ms.min_sample_shading = 1.0f;
          cmd_buffer->state.uses_out_of_order_rast = false;
          cmd_buffer->state.uses_vrs_attachment = false;
          cmd_buffer->state.force_vrs_per_vertex = false;

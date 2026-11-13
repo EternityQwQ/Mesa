@@ -117,8 +117,8 @@ enum v3d_sampler_state_variant {
         V3D_SAMPLER_STATE_F16_BGRA_UNORM,
         V3D_SAMPLER_STATE_F16_BGRA_SNORM,
         V3D_SAMPLER_STATE_F16_A,
-        V3D_SAMPLER_STATE_F16_A_SNORM,
         V3D_SAMPLER_STATE_F16_A_UNORM,
+        V3D_SAMPLER_STATE_F16_A_SNORM,
         V3D_SAMPLER_STATE_F16_LA,
         V3D_SAMPLER_STATE_F16_LA_UNORM,
         V3D_SAMPLER_STATE_F16_LA_SNORM,
@@ -128,6 +128,10 @@ enum v3d_sampler_state_variant {
         V3D_SAMPLER_STATE_32_A,
         V3D_SAMPLER_STATE_32_A_UNORM,
         V3D_SAMPLER_STATE_32_A_SNORM,
+        V3D_SAMPLER_STATE_32_LA,
+        V3D_SAMPLER_STATE_32_LA_UNORM,
+        V3D_SAMPLER_STATE_32_LA_SNORM,
+        V3D_SAMPLER_STATE_32_DEPTH_UNORM,
         V3D_SAMPLER_STATE_1010102U,
         V3D_SAMPLER_STATE_16U,
         V3D_SAMPLER_STATE_16I,
@@ -854,6 +858,20 @@ void v3d_update_compiled_cs(struct v3d_context *v3d);
 bool v3d_rt_format_is_emulated(enum pipe_format f);
 bool v3d_rt_format_supported(const struct v3d_device_info *devinfo,
                              enum pipe_format f);
+/* RGB32 buffer textures (GL_OES_texture_buffer and
+ * ARB_texture_buffer_object_rgb32) have no TMU format of their own.  They are
+ * sampled through a 32-bit single-channel view of the same memory, and the
+ * compiler turns each fetch into three scalar fetches; see
+ * v3d_nir_lower_txf_buffer_rgb32.c.
+ */
+static inline bool
+v3d_format_is_rgb32(enum pipe_format f)
+{
+        return f == PIPE_FORMAT_R32G32B32_FLOAT ||
+               f == PIPE_FORMAT_R32G32B32_UINT ||
+               f == PIPE_FORMAT_R32G32B32_SINT;
+}
+
 bool v3d_tex_format_supported(const struct v3d_device_info *devinfo,
                               enum pipe_format f);
 

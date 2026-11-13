@@ -45,6 +45,7 @@ _nak_bindings_rs = rust.bindgen(
   output : 'nak_bindings.rs',
   c_args : [
     pre_args,
+    bindgen_c_args,
   ],
   args : [
     bindgen_output_args,
@@ -62,6 +63,7 @@ _nak_bindings_rs = rust.bindgen(
     # provided through compiler::bindings::*
     '--blocklist-type', 'glsl_.*',
     '--blocklist-type', 'pipe_format.*',
+    '--blocklist-type', 'gl_frag_depth_layout',
     '--no-prepend-enum-name',
     '--with-derive-default',
   ],

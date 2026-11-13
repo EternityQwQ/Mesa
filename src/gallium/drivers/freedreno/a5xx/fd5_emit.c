@@ -10,6 +10,7 @@
 #include "util/format/u_format.h"
 #include "util/u_helpers.h"
 #include "util/u_memory.h"
+#include "util/u_prim.h"
 #include "util/u_string.h"
 #include "util/u_viewport.h"
 
@@ -416,9 +417,11 @@ emit_ssbos(struct fd_context *ctx, struct fd_ringbuffer *ring,
 
    for (unsigned i = 0; i < count; i++) {
       struct pipe_shader_buffer *buf = &so->sb[i];
-      unsigned sz = buf->buffer_size;
+      /* As on a4xx, the size is in dwords (overflowing from WIDTH into
+       * HEIGHT), and loads and stores past it are dropped.
+       */
+      unsigned sz = DIV_ROUND_UP(buf->buffer_size, 4);
 
-      /* Unlike a6xx, SSBO size is in bytes. */
       OUT_RING(ring, A5XX_SSBO_1_0_WIDTH(sz & MASK(16)));
       OUT_RING(ring, A5XX_SSBO_1_1_HEIGHT(sz >> 16));
    }
@@ -611,13 +614,6 @@ fd5_emit_state(struct fd_context *ctx, struct fd_ringbuffer *ring,
       OUT_RING(ring, A5XX_GRAS_SC_SCREEN_SCISSOR_TL_0_X(scissor->maxx) |
                         A5XX_GRAS_SC_SCREEN_SCISSOR_TL_0_Y(scissor->maxy));
 
-      OUT_PKT4(ring, REG_A5XX_GRAS_SC_VIEWPORT_SCISSOR_TL_0, 2);
-      OUT_RING(ring, A5XX_GRAS_SC_VIEWPORT_SCISSOR_TL_0_X(scissor->minx) |
-                        A5XX_GRAS_SC_VIEWPORT_SCISSOR_TL_0_Y(scissor->miny));
-      OUT_RING(ring,
-               A5XX_GRAS_SC_VIEWPORT_SCISSOR_TL_0_X(scissor->maxx) |
-                  A5XX_GRAS_SC_VIEWPORT_SCISSOR_TL_0_Y(scissor->maxy));
-
       ctx->batch->max_scissor.minx =
          MIN2(ctx->batch->max_scissor.minx, scissor->minx);
       ctx->batch->max_scissor.miny =
@@ -640,6 +636,14 @@ fd5_emit_state(struct fd_context *ctx, struct fd_ringbuffer *ring,
       OUT_RING(ring, A5XX_GRAS_CL_VPORT_YSCALE_0(vp->scale[1]));
       OUT_RING(ring, A5XX_GRAS_CL_VPORT_ZOFFSET_0(vp->translate[2]));
       OUT_RING(ring, A5XX_GRAS_CL_VPORT_ZSCALE_0(vp->scale[2]));
+
+      /* with the clip codes ignored this scissor is what bounds the viewport */
+      struct pipe_scissor_state *vscissor = &ctx->viewport_scissor[0];
+      OUT_PKT4(ring, REG_A5XX_GRAS_SC_VIEWPORT_SCISSOR_TL_0, 2);
+      OUT_RING(ring, A5XX_GRAS_SC_VIEWPORT_SCISSOR_TL_0_X(vscissor->minx) |
+                        A5XX_GRAS_SC_VIEWPORT_SCISSOR_TL_0_Y(vscissor->miny));
+      OUT_RING(ring, A5XX_GRAS_SC_VIEWPORT_SCISSOR_TL_0_X(vscissor->maxx) |
+                        A5XX_GRAS_SC_VIEWPORT_SCISSOR_TL_0_Y(vscissor->maxy));
    }
 
    if ((dirty & (FD_DIRTY_VIEWPORT | FD_DIRTY_RASTERIZER)) &&
@@ -683,9 +687,6 @@ fd5_emit_state(struct fd_context *ctx, struct fd_ringbuffer *ring,
 
       OUT_PKT4(ring, REG_A5XX_PC_RASTER_CNTL, 1);
       OUT_RING(ring, rasterizer->pc_raster_cntl);
-
-      OUT_PKT4(ring, REG_A5XX_GRAS_CL_CNTL, 1);
-      OUT_RING(ring, rasterizer->gras_cl_clip_cntl);
    }
 
    /* note: must come after program emit.. because there is some overlap
@@ -707,6 +708,18 @@ fd5_emit_state(struct fd_context *ctx, struct fd_ringbuffer *ring,
                   A5XX_PC_PRIMITIVE_CNTL_STRIDE_IN_VPC(max_loc) |
                   COND(emit->info->primitive_restart && emit->info->index_size,
                        A5XX_PC_PRIMITIVE_CNTL_PRIMITIVE_RESTART));
+
+      enum mesa_prim prim = u_reduced_prim(emit->info->mode);
+      bool guardband = prim == MESA_PRIM_POINTS || prim == MESA_PRIM_LINES;
+
+      OUT_PKT4(ring, REG_A5XX_GRAS_CL_CNTL, 1);
+      OUT_RING(ring, rasterizer->gras_cl_clip_cntl |
+                        COND(guardband, A5XX_GRAS_CL_CNTL_VP_CLIP_CODE_IGNORE));
+
+      OUT_PKT4(ring, REG_A5XX_GRAS_CL_GUARDBAND_CLIP_ADJ, 1);
+      OUT_RING(ring, COND(guardband,
+                          A5XX_GRAS_CL_GUARDBAND_CLIP_ADJ_HORZ(ctx->guardband.x) |
+                          A5XX_GRAS_CL_GUARDBAND_CLIP_ADJ_VERT(ctx->guardband.y)));
    }
 
    if (dirty & (FD_DIRTY_FRAMEBUFFER | FD_DIRTY_RASTERIZER | FD_DIRTY_PROG)) {
@@ -953,6 +966,50 @@ fd5_emit_cs_state(struct fd_context *ctx, struct fd_ringbuffer *ring,
       fd5_emit_images(ctx, ring, MESA_SHADER_COMPUTE, cp);
 }
 
+static uint32_t
+fd5_sp_dbg_eco_cntl(const struct fd_screen *screen)
+{
+   switch (screen->gpu_id) {
+   case 510:
+   case 530:
+      return 0x40000800;
+   default:
+      return 0x00000800;
+   }
+}
+
+/* Workaround bits the kernel sets in hw_init, which the restore rewrites */
+static bool
+fd5_rb_dp2_clock_gating_disabled(const struct fd_screen *screen)
+{
+   switch (screen->gpu_id) {
+   case 505:
+   case 506:
+   case 508:
+   case 509:
+   case 512:
+      return true;
+   default:
+      return false;
+   }
+}
+
+static bool
+fd5_lm_load_kill_disabled(const struct fd_screen *screen)
+{
+   switch (screen->gpu_id) {
+   case 505:
+   case 506:
+   case 508:
+   case 509:
+   case 512:
+   case 540:
+      return true;
+   default:
+      return false;
+   }
+}
+
 /* emit setup at begin of new cmdstream buffer (don't rely on previous
  * state, there could have been a context switch between ioctls):
  */
@@ -960,6 +1017,7 @@ void
 fd5_emit_restore(struct fd_batch *batch, struct fd_ringbuffer *ring)
 {
    struct fd_context *ctx = batch->ctx;
+   uint32_t hbb = ctx->screen->highest_bank_bit - 13;
 
    fd5_set_render_mode(ctx, ring, BYPASS);
    fd5_cache_flush(batch, ring);
@@ -1005,10 +1063,11 @@ fd5_emit_restore(struct fd_batch *batch, struct fd_ringbuffer *ring)
    OUT_RING(ring, 0x00000000); /* UNKNOWN_E293 */
 
    OUT_PKT4(ring, REG_A5XX_RB_MODE_CNTL, 1);
-   OUT_RING(ring, 0x00000044); /* RB_MODE_CNTL */
+   OUT_RING(ring, 0x00000040 | A5XX_RB_MODE_CNTL_HIGHESTBANKBIT(hbb));
 
    OUT_PKT4(ring, REG_A5XX_RB_DBG_ECO_CNTL, 1);
-   OUT_RING(ring, 0x00100000); /* RB_DBG_ECO_CNTL */
+   OUT_RING(ring, 0x00100000 |
+            COND(fd5_rb_dp2_clock_gating_disabled(ctx->screen), BIT(9)));
 
    OUT_PKT4(ring, REG_A5XX_VFD_MODE_CNTL, 1);
    OUT_RING(ring, 0x00000000); /* VFD_MODE_CNTL */
@@ -1019,29 +1078,25 @@ fd5_emit_restore(struct fd_batch *batch, struct fd_ringbuffer *ring)
    OUT_PKT4(ring, REG_A5XX_SP_MODE_CNTL, 1);
    OUT_RING(ring, 0x0000001c); /* SP_MODE_CNTL */
 
-   if (ctx->screen->gpu_id == 540) {
-      OUT_PKT4(ring, REG_A5XX_SP_DBG_ECO_CNTL, 1);
-      OUT_RING(ring, 0x800); /* SP_DBG_ECO_CNTL */
+   OUT_PKT4(ring, REG_A5XX_SP_DBG_ECO_CNTL, 1);
+   OUT_RING(ring, fd5_sp_dbg_eco_cntl(ctx->screen));
 
+   if (ctx->screen->gpu_id == 540) {
       OUT_PKT4(ring, REG_A5XX_HLSQ_DBG_ECO_CNTL, 1);
       OUT_RING(ring, 0x0);
-
-      OUT_PKT4(ring, REG_A5XX_VPC_DBG_ECO_CNTL, 1);
-      OUT_RING(ring, 0x800400);
-   } else {
-      OUT_PKT4(ring, REG_A5XX_SP_DBG_ECO_CNTL, 1);
-      OUT_RING(ring, 0x40000800); /* SP_DBG_ECO_CNTL */
    }
 
    OUT_PKT4(ring, REG_A5XX_TPL1_MODE_CNTL, 1);
-   OUT_RING(ring, 0x00000544); /* TPL1_MODE_CNTL */
+   OUT_RING(ring, 0x00000444 | A5XX_TPL1_MODE_CNTL_HIGHESTBANKBIT(hbb));
 
    OUT_PKT4(ring, REG_A5XX_HLSQ_TIMEOUT_THRESHOLD_0, 2);
    OUT_RING(ring, 0x00000080); /* HLSQ_TIMEOUT_THRESHOLD_0 */
    OUT_RING(ring, 0x00000000); /* HLSQ_TIMEOUT_THRESHOLD_1 */
 
    OUT_PKT4(ring, REG_A5XX_VPC_DBG_ECO_CNTL, 1);
-   OUT_RING(ring, 0x00000400); /* VPC_DBG_ECO_CNTL */
+   OUT_RING(ring, A5XX_VPC_DBG_ECO_CNTL_ALLFLATOPTDIS |
+            /* referenced as LMLOADKILLDIS in msm-4.4/kgsl */
+            COND(fd5_lm_load_kill_disabled(ctx->screen), BIT(23)));
 
    OUT_PKT4(ring, REG_A5XX_HLSQ_MODE_CNTL, 1);
    OUT_RING(ring, 0x00000001); /* HLSQ_MODE_CNTL */

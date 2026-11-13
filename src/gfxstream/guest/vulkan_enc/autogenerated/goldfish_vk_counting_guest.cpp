@@ -1430,7 +1430,7 @@ void count_VkGraphicsPipelineCreateInfo(uint32_t featureBits, VkStructureType ro
     if (featureBits & VULKAN_STREAM_FEATURE_IGNORED_HANDLES_BIT) {
         hasRasterization =
             ((((0 == toCount->pRasterizationState))
-                  ? (0)
+                  ? (1)
                   : (!((*(toCount->pRasterizationState)).rasterizerDiscardEnable))) ||
              (((0 == toCount->pDynamicState))
                   ? (0)
@@ -4992,6 +4992,22 @@ void count_VkPipelineExecutableInternalRepresentationKHR(
 }
 
 #endif
+#ifdef VK_KHR_pipeline_library
+void count_VkPipelineLibraryCreateInfoKHR(uint32_t featureBits, VkStructureType rootType,
+                                          const VkPipelineLibraryCreateInfoKHR* toCount,
+                                          size_t* count) {
+    *count += sizeof(VkStructureType);
+    if (rootType == VK_STRUCTURE_TYPE_MAX_ENUM) {
+        rootType = toCount->sType;
+    }
+    count_extension_struct(featureBits, rootType, toCount->pNext, count);
+    *count += sizeof(uint32_t);
+    if (toCount->libraryCount) {
+        *count += toCount->libraryCount * 8;
+    }
+}
+
+#endif
 #ifdef VK_KHR_maintenance6
 void count_VkSetDescriptorBufferOffsetsInfoEXT(uint32_t featureBits, VkStructureType rootType,
                                                const VkSetDescriptorBufferOffsetsInfoEXT* toCount,
@@ -5996,6 +6012,22 @@ void count_VkGuestCapabilitiesGOOGLE(uint32_t featureBits, VkStructureType rootT
     }
     count_extension_struct(featureBits, rootType, toCount->pNext, count);
     *count += sizeof(VkGuestCapabilityFlagsGOOGLE);
+}
+
+void count_VkHostPointerResolveGOOGLE(uint32_t featureBits, VkStructureType rootType,
+                                      const VkHostPointerResolveGOOGLE* toCount, size_t* count) {
+    *count += sizeof(VkStructureType);
+    if (rootType == VK_STRUCTURE_TYPE_MAX_ENUM) {
+        rootType = toCount->sType;
+    }
+    count_extension_struct(featureBits, rootType, toCount->pNext, count);
+    *count += sizeof(uint32_t);
+    *count += 8;
+    if (toCount->pHostPointer) {
+        if (toCount) {
+            *count += toCount->pointerSize * sizeof(uint8_t);
+        }
+    }
 }
 
 void count_VkDebugMetadataGOOGLE(uint32_t featureBits, VkStructureType rootType,
@@ -7121,6 +7153,14 @@ void count_extension_struct(uint32_t featureBits, VkStructureType rootType,
             break;
         }
 #endif
+#ifdef VK_KHR_pipeline_library
+        case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR: {
+            count_VkPipelineLibraryCreateInfoKHR(
+                featureBits, rootType,
+                reinterpret_cast<const VkPipelineLibraryCreateInfoKHR*>(structExtension), count);
+            break;
+        }
+#endif
 #ifdef VK_KHR_maintenance7
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR: {
             count_VkPhysicalDeviceMaintenance7FeaturesKHR(
@@ -7731,6 +7771,12 @@ void count_extension_struct(uint32_t featureBits, VkStructureType rootType,
             count_VkGuestCapabilitiesGOOGLE(
                 featureBits, rootType,
                 reinterpret_cast<const VkGuestCapabilitiesGOOGLE*>(structExtension), count);
+            break;
+        }
+        case VK_STRUCTURE_TYPE_HOST_POINTER_RESOLVE_GOOGLE: {
+            count_VkHostPointerResolveGOOGLE(
+                featureBits, rootType,
+                reinterpret_cast<const VkHostPointerResolveGOOGLE*>(structExtension), count);
             break;
         }
 #endif

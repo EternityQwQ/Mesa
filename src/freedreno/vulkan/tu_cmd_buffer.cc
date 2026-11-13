@@ -436,7 +436,7 @@ tu6_emit_flushes(struct tu_cmd_buffer *cmd_buffer,
       tu_cs_emit_pkt7(cs, CP_CCHE_INVALIDATE, 0);
    }
    if (CHIP == A7XX && (flushes & TU_CMD_FLAG_RTU_INVALIDATE) &&
-       cmd_buffer->device->physical_device->info->props.has_rt_workaround)
+       FD_QUIRK(cmd_buffer->device->physical_device->info, QCTDD10497382_rt_workaround))
       tu_emit_rt_workaround<CHIP>(cmd_buffer, cs);
    if (flushes & TU_CMD_FLAG_WAIT_MEM_WRITES)
       tu_cs_emit_pkt7(cs, CP_WAIT_MEM_WRITES, 0);
@@ -4276,7 +4276,7 @@ tu_create_cmd_buffer(struct vk_command_pool *pool,
       }
    }
 
-   tu_cs_init(&cmd_buffer->cs, device, TU_CS_MODE_GROW, 4096, "cmd cs");
+   tu_cs_init_ib1(&cmd_buffer->cs, device, TU_CS_MODE_GROW, 4096, "cmd cs");
    tu_cs_init(&cmd_buffer->draw_cs, device, TU_CS_MODE_GROW, 4096, "draw cs");
    tu_cs_init(&cmd_buffer->tile_store_cs, device, TU_CS_MODE_GROW, 2048, "tile store cs");
    tu_cs_init(&cmd_buffer->draw_epilogue_cs, device, TU_CS_MODE_GROW, 4096, "draw epilogue cs");
@@ -4894,7 +4894,8 @@ tu_bind_descriptor_sets(struct tu_cmd_buffer *cmd,
       descriptors_state->set_iova[idx] = set ?
          (set->va | BINDLESS_DESCRIPTOR_64B) : 0;
 
-      if (cmd->device->physical_device->compiler_options.enable_ssbo_emulation)
+      /* Compute consts are emitted on every dispatch. */
+      if (bind_point == VK_PIPELINE_BIND_POINT_GRAPHICS && cmd->state.program.uses_bindless_base_addrs)
          cmd->state.dirty |= TU_CMD_DIRTY_SHADER_CONSTS;
 
       if (!set)
@@ -4964,8 +4965,8 @@ tu_bind_descriptor_sets(struct tu_cmd_buffer *cmd,
                         va += offset;
 
                         if (cmd->device->physical_device->compiler_options.enable_ssbo_emulation) {
-                           dst_desc[11] = va;
-                           dst_desc[12] = va >> 32;
+                           dst_desc[FDL6_EMULATED_SSBO_ADDR_DWORD] = va;
+                           dst_desc[FDL6_EMULATED_SSBO_ADDR_DWORD + 1] = va >> 32;
                         }
 
                         unsigned new_offset = (va & 0x3f) >> offset_shift;
@@ -5070,7 +5071,8 @@ tu_set_descriptor_buffer_offsets(
           info->pOffsets[i]) |
          BINDLESS_DESCRIPTOR_64B;
 
-      if (cmd->device->physical_device->compiler_options.enable_ssbo_emulation ||
+      /* Compute consts are emitted on every dispatch. */
+      if ((bind_point == VK_PIPELINE_BIND_POINT_GRAPHICS && cmd->state.program.uses_bindless_base_addrs) ||
           set_layout->has_inline_uniforms)
          cmd->state.dirty |= TU_CMD_DIRTY_SHADER_CONSTS;
    }
@@ -5355,6 +5357,9 @@ tu_CmdBeginTransformFeedbackEXT(VkCommandBuffer commandBuffer,
                      { .cnt = 1, .wait_cache_flush = true });
 
       if (offset) {
+         /* Without a WFI, CP_REG_RMW may read a stale value. */
+         tu_cs_emit_wfi(cs);
+
          cs->rmw(VPC_SO_BUFFER_OFFSET(CHIP, idx), {
             .src1_add = true,
             .src0 = 0xffffffff,
@@ -5464,7 +5469,12 @@ tu_EndCommandBuffer(VkCommandBuffer commandBuffer)
    if (cmd_buffer->state.pass) {
       tu_clean_all_pending(&cmd_buffer->state.renderpass_cache);
       tu_emit_cache_flush_renderpass<CHIP>(cmd_buffer);
-   } else {
+   }
+
+   /* A suspended chain is rendered after cs, so in order to not lose the flushes - do them here. */
+   if (!cmd_buffer->state.pass ||
+       cmd_buffer->state.suspend_resume == SR_IN_CHAIN ||
+       cmd_buffer->state.suspend_resume == SR_IN_CHAIN_AFTER_PRE_CHAIN) {
       tu_clean_all_pending(&cmd_buffer->state.cache);
       cmd_buffer->state.cache.flush_bits |=
          TU_CMD_FLAG_CCU_CLEAN_COLOR |
@@ -8706,7 +8716,7 @@ tu6_draw_common(struct tu_cmd_buffer *cmd,
          cmd->vk.dynamic_graphics_state.ia.primitive_restart_index));
    }
 
-   if (cmd->device->physical_device->info->props.has_rt_workaround &&
+   if (FD_QUIRK(cmd->device->physical_device->info, QCTDD10497382_rt_workaround) &&
        cmd->state.program.uses_ray_intersection) {
       tu_set_render_mode<CHIP>(cs, { .shader_uses_rt = true });
    }
@@ -10164,11 +10174,15 @@ tu_dispatch(struct tu_cmd_buffer *cmd,
 
          cs->scratch_write(tu_scratch(tu_dispatch.scratch0), ~0);
 
-         /* CP_REG_RMW and CP_REG_TO_SCRATCH implicitly do a CP_WAIT_FOR_IDLE
-          * *and* CP_WAIT_FOR_ME, which is a full pipeline stall that we don't
-          * want, so manually wait for the CP_MEM_TO_REG write to land and
-          * then skip waiting below with SKIP_WAIT_FOR_ME.
+         /* CP_REG_RMW and CP_REG_TO_SCRATCH implicitly do a CP_WAIT_FOR_ME
+          * and on A750 CP_WAIT_FOR_IDLE (which is a full pipeline stall) that
+          * we don't want, so manually wait for the CP_MEM_TO_REG write to land
+          * and then skip waiting below with SKIP_WAIT_FOR_ME.
+          *
+          * On A8XX, the RMWs may still read a stale SP_CS_NDRANGE_1 without a WFI.
           */
+         if (CHIP >= A8XX)
+            tu_cs_emit_wfi(cs);
          tu_cs_emit_pkt7(cs, CP_WAIT_FOR_ME, 0);
 
          /* scratch0 = ((scratch0 & CS_NDRANGE_1) + -1
@@ -10265,7 +10279,7 @@ tu_dispatch(struct tu_cmd_buffer *cmd,
       }
    }
 
-   if (cmd->device->physical_device->info->props.has_rt_workaround &&
+   if (FD_QUIRK(cmd->device->physical_device->info, QCTDD10497382_rt_workaround) &&
        shader->variant->info.uses_ray_intersection) {
       tu_set_render_mode<CHIP>(cs, { .shader_uses_rt = true });
    }

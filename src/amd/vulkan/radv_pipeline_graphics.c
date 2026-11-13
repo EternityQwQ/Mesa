@@ -157,35 +157,6 @@ radv_pipeline_uses_vrs_attachment(const struct radv_graphics_pipeline *pipeline,
    return (create_flags & VK_PIPELINE_CREATE_2_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR) != 0;
 }
 
-static void
-radv_pipeline_init_multisample_state(const struct radv_device *device, struct radv_graphics_pipeline *pipeline,
-                                     const VkGraphicsPipelineCreateInfo *pCreateInfo,
-                                     const struct vk_graphics_pipeline_state *state)
-{
-   struct radv_multisample_state *ms = &pipeline->ms;
-
-   /* From the Vulkan 1.1.129 spec, 26.7. Sample Shading:
-    *
-    * "Sample shading is enabled for a graphics pipeline:
-    *
-    * - If the interface of the fragment shader entry point of the
-    *   graphics pipeline includes an input variable decorated
-    *   with SampleId or SamplePosition. In this case
-    *   minSampleShadingFactor takes the value 1.0.
-    * - Else if the sampleShadingEnable member of the
-    *   VkPipelineMultisampleStateCreateInfo structure specified
-    *   when creating the graphics pipeline is set to VK_TRUE. In
-    *   this case minSampleShadingFactor takes the value of
-    *   VkPipelineMultisampleStateCreateInfo::minSampleShading.
-    *
-    * Otherwise, sample shading is considered disabled."
-    */
-   if (state->ms && state->ms->sample_shading_enable) {
-      ms->sample_shading_enable = true;
-      ms->min_sample_shading = state->ms->min_sample_shading;
-   }
-}
-
 static uint64_t
 radv_dynamic_state_mask(VkDynamicState state)
 {
@@ -1082,13 +1053,13 @@ radv_pipeline_init_dynamic_state(const struct radv_device *device, struct radv_g
 }
 
 static bool
-radv_should_export_multiview(const struct radv_shader_stage *stage, const struct radv_graphics_state_key *gfx_state)
+radv_should_export_multiview(const struct radv_shader_stage *stage)
 {
    /* Export the layer in the last VGT stage if multiview is used.
     * Also checks for NONE stage, which happens when we have depth-only rendering.
     * When the next stage is unknown (with GPL or ESO), the layer is exported unconditionally.
     */
-   return gfx_state->has_multiview_view_index && radv_is_last_vgt_stage(stage) &&
+   return stage->key.multiview && radv_is_last_vgt_stage(stage) &&
           !(stage->nir->info.outputs_written & VARYING_BIT_LAYER);
 }
 
@@ -1615,7 +1586,6 @@ radv_generate_graphics_state_key(const struct radv_compiler_info *compiler_info,
    memset(&key, 0, sizeof(key));
 
    key.lib_flags = lib_flags;
-   key.has_multiview_view_index = state->mv ? !!state->mv->view_mask : 0;
 
    if (BITSET_TEST(state->dynamic, MESA_VK_DYNAMIC_VI)) {
       key.vs.has_prolog = true;
@@ -1684,6 +1654,8 @@ radv_generate_graphics_state_key(const struct radv_compiler_info *compiler_info,
 
    if (state->ms) {
       key.ms.sample_shading_enable = state->ms->sample_shading_enable;
+      if (state->ms->sample_shading_enable)
+         key.ms.min_sample_shading = state->ms->min_sample_shading;
       key.ms.max_sample_shading_enable = state->ms->sample_shading_enable && state->ms->min_sample_shading == 1;
 
       if (!BITSET_TEST(state->dynamic, MESA_VK_DYNAMIC_MS_RASTERIZATION_SAMPLES) &&
@@ -1831,6 +1803,9 @@ radv_generate_graphics_pipeline_key(const struct radv_device *device, const VkGr
       mesa_shader_stage s = vk_to_mesa_shader_stage(stage->stage);
 
       key.stage_info[s] = radv_pipeline_get_shader_key(compiler_info, stage, create_flags, pCreateInfo->pNext);
+
+      if (state->mv && state->mv->view_mask)
+         key.stage_info[s].multiview = true;
 
       if (s == MESA_SHADER_MESH && (state->shader_stages & VK_SHADER_STAGE_TASK_BIT_EXT))
          key.stage_info[s].has_task_shader = true;
@@ -2450,7 +2425,7 @@ radv_graphics_shaders_compile(const struct radv_compiler_info *compiler_info, st
       /* NIR might already have been imported from a library. */
       if (!stages[s].nir) {
          struct radv_spirv_to_nir_options options = {
-            .lower_view_index_to_zero = !gfx_state->has_multiview_view_index,
+            .lower_view_index_to_zero = !stages[s].key.multiview,
             .lower_view_index_to_device_index = stages[s].key.view_index_from_device_index,
          };
          blake3_hash key;
@@ -2683,7 +2658,7 @@ radv_graphics_shaders_compile(const struct radv_compiler_info *compiler_info, st
           BITSET_TEST(stages[i].nir->info.system_values_read, SYSTEM_VALUE_DRAW_ID))
          radv_nir_lower_draw_id_to_zero(stages[i].nir);
 
-      if (i != MESA_SHADER_MESH && radv_should_export_multiview(&stages[i], gfx_state))
+      if (i != MESA_SHADER_MESH && radv_should_export_multiview(&stages[i]))
          NIR_PASS(_, stages[i].nir, radv_nir_export_multiview);
 
       uint64_t remove_as_varying = VARYING_BIT_PSIZ | VARYING_BIT_LAYER;
@@ -3308,8 +3283,6 @@ radv_graphics_pipeline_init(struct radv_graphics_pipeline *pipeline, struct radv
    }
 
    pipeline->base.pipeline_hash = *(uint64_t *)pipeline->base.blake3;
-
-   radv_pipeline_init_multisample_state(device, pipeline, pCreateInfo, &gfx_state.vk);
 
    if (!radv_pipeline_has_stage(pipeline, MESA_SHADER_MESH))
       radv_pipeline_init_input_assembly_state(device, pipeline);

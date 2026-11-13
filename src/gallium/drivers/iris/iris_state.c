@@ -3439,7 +3439,8 @@ iris_create_surface(struct iris_screen *screen,
                               read_view->base_level,
                               0, read_view->base_array_layer,
                               &read_surf, &read_surf_offset_B,
-                              &read_surf_tile_x_sa, &read_surf_tile_y_sa);
+                              &read_surf_tile_x_sa, &read_surf_tile_y_sa,
+                              NULL);
       read_view->base_level = 0;
       read_view->base_array_layer = 0;
       assert(read_view->array_len == 1);
@@ -7835,6 +7836,13 @@ iris_upload_dirty_render_state(struct iris_context *ice,
             tbimr.HorizontalTileCount = DIV_ROUND_UP(cso_fb->width, tile_width);
             tbimr.TBIMRBatchSize = util_logbase2(batch_size) - 5;
             tbimr.TileBoxCheck = true;
+#if GFX_VERx10 >= 350
+            /* Bspec 56050 (r66625) HSD 14020415808*/
+            tbimr.PolyTriggerWidth =
+               screen->driconf.intel_tbimr_poly_trigger_width;
+            tbimr.PolyTriggerHeight =
+               screen->driconf.intel_tbimr_poly_trigger_height;
+#endif
          }
       }
    }

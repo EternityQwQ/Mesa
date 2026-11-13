@@ -951,6 +951,7 @@ radv_physical_device_get_supported_extensions(const struct radv_physical_device 
       .EXT_texel_buffer_alignment = true,
       .EXT_tooling_info = true,
       .EXT_transform_feedback = true,
+      .EXT_vertex_address_binding_unrestricted = true,
       .EXT_vertex_attribute_divisor = true,
       .EXT_vertex_input_dynamic_state = !pdev->use_llvm,
       .EXT_ycbcr_2plane_444_formats = true,
@@ -989,6 +990,7 @@ radv_physical_device_get_supported_extensions(const struct radv_physical_device 
       .MESA_image_alignment_control = pdev->info.gfx_level >= GFX9,
       .NV_compute_shader_derivatives = true,
       .NV_cooperative_matrix2 = radv_cooperative_matrix2_nv_enabled(pdev),
+      .NV_cooperative_matrix_decode_vector = radv_cooperative_matrix2_nv_enabled(pdev),
       .VALVE_mutable_descriptor_type = true,
       .VALVE_shader_mixed_float_dot_product = pdev->info.compiler_info.has_accelerated_dot_product,
       .VALVE_video_encode_rgb_conversion =
@@ -1600,6 +1602,9 @@ radv_physical_device_get_features(const struct radv_physical_device *pdev, struc
       .cooperativeMatrixTensorAddressing = true,
       .cooperativeMatrixBlockLoads = true,
 
+      /* VK_NV_cooperative_matrix_decode_vector */
+      .cooperativeMatrixDecodeVector = true,
+
       /* VK_KHR_video_encode_av1 */
       .videoEncodeAV1 = true,
 
@@ -1703,6 +1708,9 @@ radv_physical_device_get_features(const struct radv_physical_device *pdev, struc
 
       /* VK_KHR_maintenance12 */
       .maintenance12 = true,
+
+      /* VK_EXT_vertex_address_binding_unrestricted */
+      .vertexAddressBindingUnrestricted = true,
    };
 }
 
@@ -2412,7 +2420,7 @@ radv_get_physical_device_properties(struct radv_physical_device *pdev)
       .maxDescriptorHeapEmbeddedSamplers = 2048,
       .samplerYcbcrConversionCount = 3,
       .sparseDescriptorHeaps = false,
-      .protectedDescriptorHeaps = false,
+      .protectedDescriptorHeaps = radv_tmz_enabled(pdev),
 
       /* VK_KHR_device_fault */
       .maxDeviceFaultCount = 1,

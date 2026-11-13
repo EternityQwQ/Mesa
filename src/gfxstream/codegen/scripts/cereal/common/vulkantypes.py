@@ -183,6 +183,8 @@ TRIVIAL_TRANSFORMED_TYPES = [
 NON_TRIVIAL_TRANSFORMED_TYPES = [
     "VkExternalMemoryProperties",
     "VkImageCreateInfo",
+    "VkMemoryToImageCopy",
+    "VkImageToMemoryCopy",
 ]
 
 TRANSFORMED_TYPES = TRIVIAL_TRANSFORMED_TYPES + NON_TRIVIAL_TRANSFORMED_TYPES
@@ -202,7 +204,7 @@ STRUCT_MEMBER_STREAM_FEATURE = {
 STRUCT_ENV_STR = {
     "VkGraphicsPipelineCreateInfo": {
         "hasTessellation": "(arrayany pStages 0 stageCount (lambda ((s VkPipelineShaderStageCreateInfo)) (or (eq (getfield s stage) VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT) (eq (getfield s stage) VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT))))",
-        "hasRasterization" : "(or (if (eq 0 pRasterizationState) 0 (not (getfield pRasterizationState rasterizerDiscardEnable))) (if (eq 0 pDynamicState) 0 (arrayany (getfield pDynamicState pDynamicStates) 0 (getfield pDynamicState dynamicStateCount) (lambda ((s VkDynamicState)) (eq s VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE)))))"
+        "hasRasterization" : "(or (if (eq 0 pRasterizationState) 1 (not (getfield pRasterizationState rasterizerDiscardEnable))) (if (eq 0 pDynamicState) 0 (arrayany (getfield pDynamicState pDynamicStates) 0 (getfield pDynamicState dynamicStateCount) (lambda ((s VkDynamicState)) (eq s VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE)))))"
     },
 }
 
@@ -390,7 +392,10 @@ class VulkanType(object):
     # Good for inferring which things need to be marshaled in
     # versus marshaled out for Vulkan API calls
     def possiblyOutput(self,):
-        return self.pointerIndirectionLevels > 0 and (not self.isConst)
+        return self.pointerIndirectionLevels > 0 and (
+            (not self.isConst)
+            or (self.typeName in ["VkCopyImageToMemoryInfo", "VkCopyImageToMemoryInfoEXT"])
+        )
 
     def isVoidWithNoSize(self,):
         return self.typeName == "void" and self.pointerIndirectionLevels == 0

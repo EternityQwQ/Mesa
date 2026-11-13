@@ -155,9 +155,6 @@ bi_vectorize_filter(const nir_instr *instr, const void *data)
    case nir_op_bany_inequal8:
    case nir_op_bany_inequal16:
       return 1;
-   case nir_op_pack_uvec2_to_uint:
-   case nir_op_pack_uvec4_to_uint:
-      return 0;
    case nir_op_fexp2:
    case nir_op_flog2:
    case nir_op_fpow:
@@ -311,6 +308,8 @@ static void
 bi_optimize_late(nir_shader *nir, unsigned arch,
                 const struct pan_shader_info *info)
 {
+   bool use_kraid = bi_use_kraid(nir, arch);
+
    NIR_PASS(_, nir, nir_opt_shrink_stores, false /* shrink_image_store */);
    bi_optimize_loop(nir, arch, false /* allow_copies */);
 
@@ -336,9 +335,12 @@ bi_optimize_late(nir_shader *nir, unsigned arch,
    /* Algebraic can materialize instructions with a bit_size that we need to lower */
    NIR_PASS(_, nir, nir_lower_bit_size, bi_lower_bit_size,
             &(struct lower_bit_size_opts) {
-               .use_kraid = bi_use_kraid(nir, arch),
+               .use_kraid = use_kraid,
                .arch = arch,
             });
+
+   if (use_kraid)
+      NIR_PASS(_, nir, pan_nir_lower_trig);
 
    /* We need to cleanup after each iteration of late algebraic
     * optimizations, since otherwise NIR can produce weird edge cases
@@ -371,7 +373,7 @@ bi_optimize_late(nir_shader *nir, unsigned arch,
    while (late_algebraic_progress) {
       late_algebraic_progress = false;
       NIR_PASS(late_algebraic_progress, nir, bifrost_nir_lower_algebraic_late,
-               arch, bi_use_kraid(nir, arch));
+               arch, use_kraid);
       late_algebraic |= late_algebraic_progress;
    }
 

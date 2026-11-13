@@ -596,6 +596,10 @@ impl SrcRef {
         }
     }
 
+    pub fn is_immediate(&self) -> bool {
+        matches!(self, SrcRef::Imm32(_))
+    }
+
     pub fn is_carry(&self) -> bool {
         match self {
             SrcRef::SSA(ssa) => ssa.file() == RegFile::Carry,
@@ -1146,6 +1150,10 @@ impl Src {
 
     pub fn is_predicate(&self) -> bool {
         self.src_ref.is_predicate()
+    }
+
+    pub fn is_immediate(&self) -> bool {
+        self.src_ref.is_immediate()
     }
 
     pub fn is_zero(&self) -> bool {
@@ -9380,6 +9388,8 @@ pub struct FragmentShaderInfo {
     pub post_depth_coverage: bool,
     pub early_fragment_tests: bool,
     pub uses_sample_shading: bool,
+    pub z_min_bounded: bool,
+    pub z_max_bounded: bool,
 }
 
 #[derive(Debug)]

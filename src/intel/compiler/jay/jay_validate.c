@@ -109,7 +109,7 @@ get_src_words(struct validate_state *validate, jay_inst *I, unsigned s)
    if (I->op == JAY_OPCODE_DPAS) {
       const unsigned dpas_exec_size = 8 * reg_unit(shader->devinfo);
       const unsigned grf_size = shader->devinfo->grf_size;
-      const unsigned acc_size_B = jay_type_size_bits(jay_dpas_acc_type(I)) / 8;
+      const unsigned acc_size_B = jay_type_size_B(jay_dpas_acc_type(I));
 
       unsigned bytes;
       switch (s) {
@@ -198,8 +198,6 @@ validate_def(struct validate_state *validate,
       CHECK(!def.num_values_m1);
       CHECK(!def.negate);
       CHECK(!def.abs);
-   } else if (def.file == ACCUM) {
-      CHECK(validate->post_ra);
    } else {
       CHECK(jay_base_index(def) != JAY_SENTINEL || validate->post_ra);
    }

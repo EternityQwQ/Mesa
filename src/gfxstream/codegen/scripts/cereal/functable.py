@@ -109,6 +109,10 @@ RESOURCE_TRACKER_ENTRIES = [
     "vkCreatePrivateDataSlotEXT",
     "vkDestroyPrivateDataSlot",
     "vkDestroyPrivateDataSlotEXT",
+    "vkCopyMemoryToImage",
+    "vkCopyMemoryToImageEXT",
+    "vkCopyImageToMemory",
+    "vkCopyImageToMemoryEXT",
 ]
 
 SUCCESS_VAL = {
@@ -194,7 +198,6 @@ HANDLES_POST_CREATE_INIT_DEVICE = {
 # Types that have a corresponding method for transforming
 # an input list to its internal counterpart
 TYPES_TRANSFORM_LIST_METHOD = {
-    "VkFence": "FilterNoopFences",
     "VkSemaphore": "FilterNoopSemaphores",
     "VkSemaphoreSubmitInfo": "FilterNoopSemaphoreSubmitInfos",
 }

@@ -6007,6 +6007,26 @@ void unmarshal_VkPipelineExecutableInternalRepresentationKHR(
 }
 
 #endif
+#ifdef VK_KHR_pipeline_library
+void unmarshal_VkPipelineLibraryCreateInfoKHR(VulkanStreamGuest* vkStream, VkStructureType rootType,
+                                              VkPipelineLibraryCreateInfoKHR* forUnmarshaling) {
+    vkStream->read(&forUnmarshaling->sType, sizeof(VkStructureType));
+    if (rootType == VK_STRUCTURE_TYPE_MAX_ENUM) {
+        rootType = forUnmarshaling->sType;
+    }
+    unmarshal_extension_struct(vkStream, rootType, (void*)(forUnmarshaling->pNext));
+    vkStream->read(&forUnmarshaling->libraryCount, sizeof(uint32_t));
+    if (forUnmarshaling->libraryCount) {
+        uint64_t* cgen_var_0;
+        vkStream->alloc((void**)&cgen_var_0, forUnmarshaling->libraryCount * 8);
+        vkStream->read(cgen_var_0, forUnmarshaling->libraryCount * 8);
+        for (uint32_t k = 0; k < forUnmarshaling->libraryCount; ++k) {
+            ((VkPipeline*)forUnmarshaling->pLibraries)[k] = (VkPipeline)(uintptr_t)(cgen_var_0[k]);
+        }
+    }
+}
+
+#endif
 #ifdef VK_KHR_maintenance6
 void unmarshal_VkSetDescriptorBufferOffsetsInfoEXT(
     VulkanStreamGuest* vkStream, VkStructureType rootType,
@@ -7115,6 +7135,25 @@ void unmarshal_VkGuestCapabilitiesGOOGLE(VulkanStreamGuest* vkStream, VkStructur
     vkStream->read(&forUnmarshaling->capabilities, sizeof(VkGuestCapabilityFlagsGOOGLE));
 }
 
+void unmarshal_VkHostPointerResolveGOOGLE(VulkanStreamGuest* vkStream, VkStructureType rootType,
+                                          VkHostPointerResolveGOOGLE* forUnmarshaling) {
+    vkStream->read(&forUnmarshaling->sType, sizeof(VkStructureType));
+    if (rootType == VK_STRUCTURE_TYPE_MAX_ENUM) {
+        rootType = forUnmarshaling->sType;
+    }
+    unmarshal_extension_struct(vkStream, rootType, (void*)(forUnmarshaling->pNext));
+    vkStream->read(&forUnmarshaling->pointerSize, sizeof(uint32_t));
+    uint64_t check_pHostPointer = vkStream->getBe64();
+    if (forUnmarshaling->pHostPointer) {
+        if (!(check_pHostPointer)) {
+            GFXSTREAM_ERROR(
+                "fatal: forUnmarshaling->pHostPointer inconsistent between guest and host");
+        }
+        vkStream->read(forUnmarshaling->pHostPointer,
+                       forUnmarshaling->pointerSize * sizeof(uint8_t));
+    }
+}
+
 void unmarshal_VkDebugMetadataGOOGLE(VulkanStreamGuest* vkStream, VkStructureType rootType,
                                      VkDebugMetadataGOOGLE* forUnmarshaling) {
     vkStream->read(&forUnmarshaling->sType, sizeof(VkStructureType));
@@ -8140,6 +8179,14 @@ void unmarshal_extension_struct(VulkanStreamGuest* vkStream, VkStructureType roo
             break;
         }
 #endif
+#ifdef VK_KHR_pipeline_library
+        case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR: {
+            unmarshal_VkPipelineLibraryCreateInfoKHR(
+                vkStream, rootType,
+                reinterpret_cast<VkPipelineLibraryCreateInfoKHR*>(structExtension_out));
+            break;
+        }
+#endif
 #ifdef VK_KHR_maintenance7
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR: {
             unmarshal_VkPhysicalDeviceMaintenance7FeaturesKHR(
@@ -8686,6 +8733,12 @@ void unmarshal_extension_struct(VulkanStreamGuest* vkStream, VkStructureType roo
                 reinterpret_cast<VkGuestCapabilitiesGOOGLE*>(structExtension_out));
             break;
         }
+        case VK_STRUCTURE_TYPE_HOST_POINTER_RESOLVE_GOOGLE: {
+            unmarshal_VkHostPointerResolveGOOGLE(
+                vkStream, rootType,
+                reinterpret_cast<VkHostPointerResolveGOOGLE*>(structExtension_out));
+            break;
+        }
 #endif
 #ifdef VK_EXT_border_color_swizzle
         case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT: {
@@ -9143,13 +9196,21 @@ const char* api_opcode_to_string(const uint32_t opcode) {
         case OP_vkCmdSetPrimitiveRestartEnableEXT:
             return "OP_vkCmdSetPrimitiveRestartEnableEXT";
 #endif
+#ifdef VK_EXT_host_image_copy
+        case OP_vkCopyImageToMemoryEXT:
+            return "OP_vkCopyImageToMemoryEXT";
+        case OP_vkCopyMemoryToImageEXT:
+            return "OP_vkCopyMemoryToImageEXT";
+        case OP_vkCopyImageToImageEXT:
+            return "OP_vkCopyImageToImageEXT";
+        case OP_vkTransitionImageLayoutEXT:
+            return "OP_vkTransitionImageLayoutEXT";
+        case OP_vkGetImageSubresourceLayout2EXT:
+            return "OP_vkGetImageSubresourceLayout2EXT";
+#endif
 #ifdef VK_EXT_host_query_reset
         case OP_vkResetQueryPoolEXT:
             return "OP_vkResetQueryPoolEXT";
-#endif
-#ifdef VK_EXT_image_compression_control
-        case OP_vkGetImageSubresourceLayout2EXT:
-            return "OP_vkGetImageSubresourceLayout2EXT";
 #endif
 #ifdef VK_EXT_image_drm_format_modifier
         case OP_vkGetImageDrmFormatModifierPropertiesEXT:

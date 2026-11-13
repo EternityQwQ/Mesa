@@ -575,6 +575,26 @@ alpha_to_coverage_enabled(nir_shader *shader, enum intel_sometimes alpha_to_cove
       alpha_to_coverage : INTEL_NEVER;
 }
 
+static bool
+lower_demote_to_terminate(nir_builder *b, nir_intrinsic_instr *intr, void *_)
+{
+   switch (intr->intrinsic) {
+   case nir_intrinsic_demote:
+      intr->intrinsic = nir_intrinsic_terminate;
+      return true;
+   case nir_intrinsic_demote_if:
+      intr->intrinsic = nir_intrinsic_terminate_if;
+      return true;
+   case nir_intrinsic_load_helper_invocation:
+   case nir_intrinsic_is_helper_invocation:
+      b->cursor = nir_before_instr(&intr->instr);
+      nir_def_replace(&intr->def, nir_imm_false(b));
+      return true;
+   default:
+      return false;
+   }
+}
+
 /**
  * Do NIR processing that can be shared across all SIMD width variants.
  */
@@ -938,14 +958,6 @@ jay_process_nir(const struct intel_device_info *devinfo,
                     !(nir->info.outputs_written & BITFIELD64_BIT(FRAG_RESULT_SAMPLE_MASK))),
                    NULL, NULL);
 
-      /* nir_lower_terminate_to_demote will hamper our ability to schedule
-       * terminates (since it turns them into real control flow), so run
-       * nir_opt_move_discards_to_top first as a prepass. That should help
-       * scheduling demotes too (which is more important).
-       */
-      JAY_NIR_PASS(nir_opt_move_discards_to_top);
-      JAY_NIR_PASS(nir_lower_terminate_to_demote);
-
       brw_nir_cleanup_pre_fs_prog_data(pt);
 
       // TODO
@@ -955,6 +967,23 @@ jay_process_nir(const struct intel_device_info *devinfo,
        * information.
        */
       jay_populate_prog_data(devinfo, nir, prog_data, key, fs_perprim);
+
+      /* Although its not required by the spec, other vendors mask out helper
+       * lanes entirely unless the shader uses derivatives. Some applications
+       * depend on this behavior not to get stuck in infinite loops.
+       */
+      if (!prog_data->fs.uses_vmask && !nir->info.maximally_reconverges) {
+         JAY_NIR_PASS(nir_shader_intrinsics_pass, lower_demote_to_terminate,
+                      nir_metadata_control_flow, NULL);
+      }
+
+      /* nir_lower_terminate_to_demote will hamper our ability to schedule
+       * terminates (since it turns them into real control flow), so run
+       * nir_opt_move_discards_to_top first as a prepass. That should help
+       * scheduling demotes too (which is more important).
+       */
+      JAY_NIR_PASS(nir_opt_move_discards_to_top);
+      JAY_NIR_PASS(nir_lower_terminate_to_demote);
 
       JAY_NIR_PASS(nir_shader_intrinsics_pass, lower_load_barycentric_at_offset,
                    0, NULL);
@@ -1207,22 +1236,26 @@ jay_process_nir_for_simd(const struct intel_device_info *devinfo,
    if (nir->info.stage == MESA_SHADER_FRAGMENT) {
       /* Certain features require tracking helpers for correctness */
       nir_shader_gather_info(nir, nir_shader_get_entrypoint(nir));
-      *track_helpers |= nir->info.fs.uses_discard || nir->info.writes_memory;
-      *track_helpers |= BITSET_TEST(nir->info.system_values_read,
-                                    SYSTEM_VALUE_HELPER_INVOCATION);
 
-      /* ...but this is more subtle. nir_opt_load_skip_helpers flags texturing
-       * operations that we can skip for bandwidth savings.  We need divergence
-       * info for this, so we run late. Of course, if we don't spawn helper
-       * threads and we don't demote anything, there will never be helpers
-       * active so there's nothing to skip in software.
-       */
-      struct nir_opt_load_skip_helpers_options skip_helpers = {
-         .no_add_divergence = true
-      };
-      if (params->prog_data->fs.uses_vmask || nir->info.fs.uses_discard) {
-         *track_helpers |=
-            JAY_NIR_PASS(nir_opt_load_skip_helpers, &skip_helpers);
+      if (params->prog_data->fs.uses_vmask || nir->info.maximally_reconverges) {
+         *track_helpers |= nir->info.fs.uses_discard | nir->info.writes_memory;
+         *track_helpers |= BITSET_TEST(nir->info.system_values_read,
+                                       SYSTEM_VALUE_HELPER_INVOCATION);
+
+         if (params->prog_data->fs.uses_vmask || nir->info.fs.uses_discard) {
+            /* ...but this is more subtle. nir_opt_load_skip_helpers flags
+             * texturing operations that we can skip for bandwidth savings.  We
+             * need divergence info for this, so we run late. Of course, if we
+             * don't spawn helper threads and we don't demote anything, there
+             * will never be helpers active so there's nothing to skip in
+             * software.
+             */
+            struct nir_opt_load_skip_helpers_options skip_helpers = {
+               .no_add_divergence = true
+            };
+            *track_helpers |=
+               JAY_NIR_PASS(nir_opt_load_skip_helpers, &skip_helpers);
+         }
       }
    } else {
       jay_populate_prog_data(devinfo, nir, params->prog_data, params->key, NULL);

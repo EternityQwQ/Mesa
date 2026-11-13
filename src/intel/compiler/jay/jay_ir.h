@@ -33,13 +33,13 @@ enum PACKED jay_file {
    FLAG = 4,
    UFLAG = FLAG | JAY_UNIFORM,
 
+   /** Accumulators: 32-bits values (per SIMT lane or uniform) */
+   ACCUM = 6,
+
    /** Address registers */
-   J_ADDRESS = 6 | JAY_UNIFORM,
+   J_ADDRESS = 8 | JAY_UNIFORM,
 
    /* Non-SSA files below: */
-
-   /** Accumulators: 32-bits values (per SIMT lane or uniform) */
-   ACCUM = 8,
 
    /** Inputs within Jay unit tests */
    TEST_FILE = 10,
@@ -54,7 +54,7 @@ enum PACKED jay_file {
    JAY_NUM_SSA_FILES = J_ADDRESS + 1,
 
    /* Set of files that the main RA (and not eg flag RA) allocates. */
-   JAY_NUM_RA_FILES = UFLAG + 1,
+   JAY_NUM_RA_FILES = ACCUM + 1,
    JAY_NUM_GRF_FILES = UGPR + 1,
 };
 static_assert(JAY_FILE_LAST <= 0b1111, "must fit in 4 bits (see jay_def)");
@@ -547,6 +547,12 @@ jay_type_size_bits(enum jay_type t)
    return t & ~JAY_TYPE_BASE_MASK;
 }
 
+static inline unsigned
+jay_type_size_B(enum jay_type t)
+{
+   return jay_type_size_bits(t) / 8;
+}
+
 static inline enum jay_type
 jay_type_rebase(enum jay_type t, enum jay_type new_base)
 {
@@ -804,9 +810,6 @@ enum jay_block_type {
    /** A block reserved for post-RA spill lowering */
    JAY_BLOCK_SPILL,
 
-   /** A block containing accumulators mapped as GPRs */
-   JAY_BLOCK_ACCUM,
-
    JAY_BLOCK_TYPES,
 };
 
@@ -1001,6 +1004,10 @@ jay_clobbers_address_reg(const jay_inst *I)
 static inline unsigned
 jay_src_alignment(jay_shader *shader, const jay_inst *I, unsigned s)
 {
+   if (jay_is_flag(I->src[s])) {
+      return 1;
+   }
+
    /* SENDs operate on entire GRFs at a time, so align UGPRs to GRFs. */
    if (I->op == JAY_OPCODE_SEND && I->src[s].file == UGPR) {
       return jay_ugpr_per_grf(shader);
@@ -1044,6 +1051,10 @@ jay_src_alignment(jay_shader *shader, const jay_inst *I, unsigned s)
 static inline unsigned
 jay_dst_alignment(jay_shader *shader, const jay_inst *I)
 {
+   if (jay_is_flag(I->dst)) {
+      return 1;
+   }
+
    /* SENDs write entire GRFs, so align UGPRs to GRFs. Similarly for any
     * instructions involving accumulators:
     *

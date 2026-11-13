@@ -508,17 +508,6 @@ dst.x |= _mesa_signed_to_signed(src0.y, 16) << 16;
 Convert two signed integers into a packed signed short (clamp is applied).
 """)
 
-unop_horiz("pack_uvec2_to_uint", 1, tuint32, 2, tuint32, """
-dst.x = (src0.x & 0xffff) | (src0.y << 16);
-""")
-
-unop_horiz("pack_uvec4_to_uint", 1, tuint32, 4, tuint32, """
-dst.x = ((src0.x & 0xff) <<  0) |
-        ((src0.y & 0xff) <<  8) |
-        ((src0.z & 0xff) << 16) |
-        ((src0.w & 0xff) << 24);
-""")
-
 unop_horiz("pack_32_4x8", 1, tuint32, 4, tuint8,
            "dst.x = src0.x | ((uint32_t)src0.y << 8) | ((uint32_t)src0.z << 16) | ((uint32_t)src0.w << 24);")
 
@@ -811,6 +800,11 @@ binop_convert("imul_2x32_64", tint64, tint32, _2src_commutative,
 binop_convert("umul_2x32_64", tuint64, tuint32, _2src_commutative,
               "(uint64_t)src0 * (uint64_t)src1",
               description = "Multiply unsigned 32-bit integers, 64-bit result")
+
+opcode("umad_2x32_64", 0, tuint64, [0, 0, 0], [tuint32, tuint32, tuint64], False, _2src_commutative, """
+   /* Use 64-bit multiplies to prevent overflow of signed arithmetic */
+   dst = (uint64_t)src0 * (uint64_t)src1 + src2;
+""", description = "Low 32-bits of signed/unsigned integer multiply plus 64 addition")
 
 binop("imul_high", tint, _2src_commutative, """
 if (bit_size == 64) {
@@ -1507,6 +1501,14 @@ triop_shift_pan("lrot", tuint, "(src0 << shift) |\
                                 (src0 >> ((-shift) & shift_mask))")
 triop_shift_pan("rrot", tuint, "(src0 >> shift) |\
                                 (src0 << ((-shift) & shift_mask))")
+
+# Fused multiply-add followed by a power-of-two scale, rounded to nearest even.
+# The hardware has some precision issues around subnormal inputs/outputs
+# so it should only be used for trascendentals and specficic cases not
+# requiring absolute precision.
+opcode("fma_rscale_pan", 0, tfloat32, [0, 0, 0, 0],
+       [tfloat32, tfloat32, tfloat32, tint32], False, _2src_commutative,
+       "ldexp(fma(src0, src1, src2), src3)")
 
 # r600/gcn specific instruction that evaluates unnormalized cube texture coordinates
 # and face index

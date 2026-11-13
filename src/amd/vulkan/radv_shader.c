@@ -811,7 +811,10 @@ radv_shader_spirv_to_nir(const struct radv_compiler_info *compiler_info, struct 
 
       NIR_PASS(_, nir, nir_opt_scalar_array_vars_to_vec, nir_var_function_temp | nir_var_mem_shared);
 
-      NIR_PASS(_, nir, nir_opt_memcpy);
+      bool memcpy_progress = false;
+      NIR_PASS(memcpy_progress, nir, nir_opt_memcpy);
+      if (memcpy_progress)
+         NIR_PASS(_, nir, nir_split_var_copies);
       NIR_PASS(_, nir, nir_opt_deref);
    }
 
@@ -1085,7 +1088,7 @@ radv_lower_ngg(const struct radv_compiler_info *compiler_info, struct radv_shade
 
       options.has_gen_prim_query = info->ms.has_query;
       options.has_ms_gs_invocations_query = info->ms.has_query;
-      options.multiview = gfx_state->has_multiview_view_index;
+      options.multiview = ngg_stage->key.multiview;
 
       bool scratch_ring = false;
       NIR_PASS(_, nir, ac_nir_lower_ngg_mesh, &options, &scratch_ring);
